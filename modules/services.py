@@ -1,7 +1,10 @@
+"""
+CREW DUTY ENGINE V2 - Core Bridge Services
+"""
 import os
 import sys
 
-# 🛠️ 自動加入專案根目錄，解決 Streamlit Cloud 找不到 config.py 的問題
+# 🛠️ 自動錨定專案根目錄，解決跨資料夾引用問題
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
@@ -14,8 +17,31 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
-# 載入根目錄設定
-from config import DATA_DIR, SYSTEM_CONFIG_FILE, UNITS, WHITELIST_FILE
+# 安全載入 config 設定 (若失敗則套用預設路徑)
+try:
+    from config import DATA_DIR, SYSTEM_CONFIG_FILE, UNITS, WHITELIST_FILE
+except ImportError:
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    SYSTEM_CONFIG_FILE = os.path.join(DATA_DIR, "system_config.json")
+    WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.json")
+    UNITS = {
+        "TTN": {
+            "服勤員": os.path.join(DATA_DIR, "TTN_TA.xlsx"),
+            "駕駛": os.path.join(DATA_DIR, "TTN_TD.xlsx"),
+            "列車長": os.path.join(DATA_DIR, "TTN_TM.xlsx"),
+        },
+        "TTC": {
+            "服勤員": os.path.join(DATA_DIR, "TTC_TA.xlsx"),
+            "駕駛": os.path.join(DATA_DIR, "TTC_TD.xlsx"),
+            "列車長": os.path.join(DATA_DIR, "TTC_TM.xlsx"),
+        },
+        "TTS": {
+            "服勤員": os.path.join(DATA_DIR, "TTS_TA.xlsx"),
+            "駕駛": os.path.join(DATA_DIR, "TTS_TD.xlsx"),
+            "列車長": os.path.join(DATA_DIR, "TTS_TM.xlsx"),
+        },
+    }
+
 from modules.utils import (
     calculate_consecutive_work_days,
     check_shift_legality,
@@ -27,6 +53,7 @@ from modules.utils import (
     safe_read_excel,
     translate_train_code,
 )
+
 # ---------------------------------------------------------
 # 1. 載入全站系統設定與白名單
 # ---------------------------------------------------------
@@ -89,9 +116,6 @@ def verify_crew_membership(selected_unit: str, emp_id: str) -> bool:
 # 2. V2 前台專用：真實全月班表 JSON 解析器
 # ---------------------------------------------------------
 def get_crew_full_schedule_json(target_emp: str, unit_code: str = "TTN") -> Dict[str, Any]:
-    """
-    調用 V1 process_file_data 真實算力，將班表轉為 V2 redesign.html 所需之 JSON 格式
-    """
     target_emp_str = str(target_emp).strip().upper()
     unit_files = UNITS.get(unit_code, UNITS.get("TTN", {}))
 
@@ -134,7 +158,6 @@ def get_crew_full_schedule_json(target_emp: str, unit_code: str = "TTN") -> Dict
         parsed = parse_cell(raw_cell)
         is_off = is_cell_off_day(raw_cell)
 
-        # 日期與星期
         d_str = m.group(1)
         wd_list = ["日", "一", "二", "三", "四", "五", "六"]
         try:
@@ -160,7 +183,6 @@ def get_crew_full_schedule_json(target_emp: str, unit_code: str = "TTN") -> Dict
             if is_town_shift(parsed["train"], parsed["note"]):
                 tags.append("非正線")
 
-            # 班間休息合規檢查 (呼叫 V1 check_shift_legality)
             is_legal, warn_msg, rest_info = check_shift_legality(found_row, col_idx, all_cols)
             rest_val = rest_info.get("min_interval")
             
@@ -195,9 +217,6 @@ def get_crew_full_schedule_json(target_emp: str, unit_code: str = "TTN") -> Dict
 # 3. V2 前台專用：動態換班快搜算力引擎
 # ---------------------------------------------------------
 def search_exchange_candidates_v2(unit_code: str = "TTN", target_date: str = "9/15", time_from: str = "05:00", time_to: str = "10:00") -> Dict[str, List[Dict[str, Any]]]:
-    """
-    從 Excel 檔案中檢索符合特定 Sign-In 時段區間之組員
-    """
     unit_files = UNITS.get(unit_code, UNITS.get("TTN", {}))
     result = {"服勤員": [], "駕駛": [], "列車長": []}
 
@@ -209,7 +228,6 @@ def search_exchange_candidates_v2(unit_code: str = "TTN", target_date: str = "9/
             df = safe_read_excel(file_path, header=3)
             df.columns = [str(c).strip() for c in df.columns]
 
-            # 尋找對應日期欄位
             target_col_idx = -1
             for idx, col in enumerate(df.columns[2:], start=2):
                 m = re.search(r"(\d+/\d+)", str(col))
@@ -231,7 +249,6 @@ def search_exchange_candidates_v2(unit_code: str = "TTN", target_date: str = "9/
                 start_t = parsed["start"]
 
                 if start_t and time_from <= start_t <= time_to:
-                    # 班間合規檢查
                     _, _, rest_info = check_shift_legality(row, target_col_idx, df.columns)
                     rest_val = rest_info.get("min_interval")
                     rest_tag = "green"
