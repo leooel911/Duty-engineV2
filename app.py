@@ -3,11 +3,11 @@ from datetime import datetime, timedelta
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 1. 載入核心模組與算力服務
+# 核心模組算力導入
 from modules.utils import format_day_duty_to_v2
 from modules.services import get_current_duty_status, process_uploaded_excel
 
-# 2. Streamlit 視口與頁面設定
+# 視口配置
 st.set_page_config(
     page_title="CREW DUTY ENGINE V2",
     page_icon="🚆",
@@ -15,18 +15,26 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------------------------------------------------------
-# 3. Session State 狀態與動態基地單位管理
-# ---------------------------------------------------------
+# 自訂暗黑風 Streamlit 原生控制列樣式
+st.markdown(
+    """
+    <style>
+    .stApp { background-color: #070B10 !important; color: #ECF1F5 !important; }
+    div[data-testid="stToolbar"], header[data-testid="stHeader"] { display: flex !important; }
+    .stSelectbox label, .stFileUploader label { color: #8492A1 !important; font-weight: 600; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Session State 全域狀態管理
 if "current_unit_code" not in st.session_state:
     st.session_state.current_unit_code = "TTN"
 if "current_unit_name" not in st.session_state:
     st.session_state.current_unit_name = "台中乘務區"
-
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = True
-
-if "user_info" not in st.session_state or st.session_state.user_info is None:
+if "last_sync_time" not in st.session_state:
+    st.session_state.last_sync_time = "2026-09-05 20:40"
+if "user_info" not in st.session_state:
     st.session_state.user_info = {
         "emp_id": "A026047",
         "name": "江立夫",
@@ -34,167 +42,55 @@ if "user_info" not in st.session_state or st.session_state.user_info is None:
         "role": "ADMIN"
     }
 
-if "admin_mode" not in st.session_state:
-    st.session_state.admin_mode = False
-
-if "last_sync_time" not in st.session_state:
-    st.session_state.last_sync_time = "2026-09-05 20:40"
-
-# URL 動作事件處理
-action = st.query_params.get("action")
-if action == "logout":
-    st.session_state.authenticated = False
-    st.session_state.user_info = None
-    st.session_state.admin_mode = False
-    st.query_params.clear()
-    st.rerun()
-elif action == "toggle_admin":
-    st.session_state.admin_mode = not st.session_state.admin_mode
-    st.query_params.clear()
-    st.rerun()
+# 頂部模式切換器 (Streamlit Native - 免除 iframe 阻擋問題)
+page_mode = st.radio(
+    "系統模式選單",
+    ["📱 乘務 App 前台", "⚙️ 上傳乘務大表 Excel (管理員)"],
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
 # ---------------------------------------------------------
-# 4. 未登入畫面 (Login UI)
+# 模式 A：⚙️ 上傳乘務大表 Excel 頁面
 # ---------------------------------------------------------
-if not st.session_state.authenticated:
-    if action == "login":
-        emp_id = st.query_params.get("id", "A026047")
-        name = st.query_params.get("name", "江立夫")
-        
-        st.session_state.authenticated = True
-        st.session_state.user_info = {
-            "emp_id": emp_id,
-            "name": name,
-            "title": "車務幹部/組員",
-            "role": "ADMIN"
-        }
-        st.query_params.clear()
-        st.rerun()
+if page_mode == "⚙️ 上傳乘務大表 Excel (管理員)":
+    st.title("⚙️ CREW DUTY ENGINE · 乘務大表資料庫")
+    st.caption(f"登入管理員：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+    st.divider()
 
-    LOGIN_HTML = """
-    <!DOCTYPE html>
-    <html lang="zh-Hant">
-    <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+TC:wght@400;600;700&display=swap');
-      body {
-        margin:0; padding:20px; background:#070B10; color:#ECF1F5;
-        font-family:'IBM Plex Sans TC', sans-serif;
-        display:flex; align-items:center; justify-content:center; height:100vh;
-      }
-      .login-card {
-        width:100%; max-width:360px; background:#0E141C; border:1px solid #232E3A;
-        border-radius:16px; padding:28px 24px; text-align:center;
-      }
-      .logo {
-        width:48px; height:48px; background:#141C26; border:1px solid #232E3A;
-        border-radius:12px; margin:0 auto 16px; display:flex; align-items:center;
-        justify-content:center; font-family:'IBM Plex Mono', monospace;
-        font-weight:700; color:#4C9AE0; font-size:18px;
-      }
-      h2 { font-size:18px; font-weight:700; margin:0 0 4px; }
-      p { font-size:12px; color:#59636E; margin:0 0 24px; }
-      .input-group { text-align:left; margin-bottom:14px; }
-      label { font-size:11px; font-weight:600; color:#8492A1; display:block; margin-bottom:6px; }
-      input {
-        width:100%; padding:10px 12px; background:#141C26; border:1px solid #232E3A;
-        border-radius:8px; color:#ECF1F5; font-size:14px; font-family:'IBM Plex Mono', monospace;
-        box-sizing:border-box; outline:none;
-      }
-      input:focus { border-color:#4C9AE0; }
-      .btn-submit {
-        width:100%; padding:12px; background:#4C9AE0; color:#070B10; font-weight:700;
-        font-size:14px; border:none; border-radius:8px; cursor:pointer; margin-top:10px;
-      }
-    </style>
-    </head>
-    <body>
-      <div class="login-card">
-        <div class="logo">CD</div>
-        <h2>CREW DUTY ENGINE</h2>
-        <p>請輸入乘務員編號進行系統認證</p>
-        <form onsubmit="handleLogin(event)">
-          <div class="input-group">
-            <label>乘務員編 (Emp ID)</label>
-            <input type="text" id="emp_id" value="A026047" required />
-          </div>
-          <div class="input-group">
-            <label>姓名 (Name)</label>
-            <input type="text" id="emp_name" value="江立夫" required />
-          </div>
-          <button type="submit" class="btn-submit">登入乘務系統</button>
-        </form>
-      </div>
-      <script>
-        function handleLogin(e){
-          e.preventDefault();
-          const empId = document.getElementById('emp_id').value;
-          const empName = document.getElementById('emp_name').value;
-          window.top.location.href = window.top.location.pathname + `?action=login&id=${encodeURIComponent(empId)}&name=${encodeURIComponent(empName)}`;
-        }
-      </script>
-    </body>
-    </html>
-    """
-    components.html(LOGIN_HTML, height=800, scrolling=False)
-    st.stop()
-
-# ---------------------------------------------------------
-# 5. 後台管理員控制台 (Admin Panel - 自動抓取基地)
-# ---------------------------------------------------------
-if st.session_state.admin_mode:
-    st.markdown(
-        """
-        <style>
-        header[data-testid="stHeader"], [data-testid="stToolbar"] { display: flex !important; }
-        .stApp { background-color: #070B10 !important; color: #ECF1F5 !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.title("⚙️ CREW DUTY ENGINE · 後台管理控制台")
-    st.caption(f"當前管理員：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
-    
     col1, col2 = st.columns([2, 1])
+    
     with col1:
-        st.subheader("📤 上傳與更新乘務大表 Excel")
-        uploaded_file = st.file_uploader("選擇月度班表 Excel 檔案 (.xls, .xlsx)", type=["xls", "xlsx"])
+        st.subheader("📤 上傳月度班表 Excel")
+        uploaded_file = st.file_uploader("請選擇乘務大表 (.xls 或 .xlsx)", type=["xls", "xlsx"])
         
         if uploaded_file is not None:
             success, msg, df, (unit_code, unit_name) = process_uploaded_excel(uploaded_file)
             if success:
                 st.success(msg)
-                # 動態寫入解析到的基地資訊
                 st.session_state.current_unit_code = unit_code
                 st.session_state.current_unit_name = unit_name
                 st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
                 
-                st.subheader("📊 班表資料庫即時預覽")
-                st.dataframe(df.head(15), use_container_width=True)
+                st.subheader("📊 班表資料庫預覽 (前 20 列)")
+                st.dataframe(df.head(20), use_container_width=True)
             else:
                 st.error(msg)
-                
+
     with col2:
-        st.subheader("📌 系統與資料庫狀態")
-        st.metric("大表識別基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
-        st.metric("最後同步時間", st.session_state.last_sync_time)
-        st.divider()
-        if st.button("⬅️ 切換回前台乘務 App 視角", use_container_width=True):
-            st.session_state.admin_mode = False
-            st.rerun()
+        st.subheader("📌 當前系統狀態")
+        st.metric("大表自動識別基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
+        st.metric("資料庫最後同步", st.session_state.last_sync_time)
+        st.info("💡 提示：在此處完成上傳後，請切換回「📱 乘務 App 前台」檢視更新後的班表。")
+
     st.stop()
 
 # ---------------------------------------------------------
-# 6. 前台使用者 UI (動態注入基地資訊)
+# 模式 B：📱 乘務 App 前台介面
 # ---------------------------------------------------------
 st.markdown(
     """
     <style>
-    header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], footer {
-        display: none !important; height: 0px !important;
-    }
     html, body, .stApp, [data-testid="stAppViewContainer"] {
         padding: 0 !important; margin: 0 !important; background-color: #070B10 !important;
         overflow: hidden !important; height: 100dvh !important;
@@ -206,21 +102,20 @@ st.markdown(
     div[data-testid="stElementContainer"] { margin: 0 !important; padding: 0 !important; }
     iframe {
         border: none !important; width: 100vw !important; height: 100dvh !important;
-        position: fixed !important; top: 0 !important; left: 0 !important; z-index: 999999 !important;
+        position: fixed !important; top: 35px !important; left: 0 !important; z-index: 999999 !important;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# 帶入動態基地單位
 backend_user_info = {
     "emp_id": st.session_state.user_info["emp_id"],
     "name": st.session_state.user_info["name"],
     "unit": st.session_state.current_unit_code,
     "unit_name": st.session_state.current_unit_name,
     "title": st.session_state.user_info["title"],
-    "role": st.session_state.user_info.get("role", "CREW")
+    "role": st.session_state.user_info["role"]
 }
 
 now = datetime.now()
@@ -242,11 +137,7 @@ for idx, item in enumerate(raw_schedule_data):
 
 duty_status = get_current_duty_status(processed_week)
 
-backend_schedule = {
-    "week1": processed_week,
-    "week2": [],
-    "week3": []
-}
+backend_schedule = {"week1": processed_week, "week2": [], "week3": []}
 
 backend_exchange_candidates = {
     "服勤員": [
@@ -377,7 +268,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
   </header>
 
   <main id="mainContainer">
-    <!-- 1. 今日首頁 -->
     <section class="screen active" id="screen-home">
       <div class="hero">
         <div class="hero-top">
@@ -418,7 +308,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       </div>
     </section>
 
-    <!-- 2. 我的班表 -->
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
       <div class="legend-bar">
@@ -433,13 +322,11 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       <div class="panel" id="scheduleContainer"></div>
     </section>
 
-    <!-- 3. 換班快搜 -->
     <section class="screen" id="screen-exchange">
       <div class="section-label" style="margin-top:2px;">換班快搜名單</div>
       <div class="panel" id="exchangeContainer"></div>
     </section>
 
-    <!-- 4. 我的 (Profile) -->
     <section class="screen" id="screen-profile">
       <div style="display:flex;align-items:center;gap:12px;padding:6px 2px 16px;">
         <div style="width:44px;height:44px;border-radius:10px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:monospace;font-weight:700;color:var(--blue);font-size:15px;" id="profileAvatar">--</div>
@@ -458,14 +345,12 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 
       <div class="section-label">系統管理與設定</div>
       <div class="panel" style="padding:4px 12px;">
-        <div class="duty-row" onclick="handleAdminToggle()"><span style="font-size:13.5px;color:var(--blue);flex:1;font-weight:600;">⚙️ 開啟後台管理面板 (上傳大表)</span><span style="color:var(--dim-2);">›</span></div>
         <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">問題回報與建議</span><span style="color:var(--dim-2);">›</span></div>
-        <div class="duty-row" onclick="handleLogout()"><span style="font-size:13.5px;color:var(--red);flex:1;">登出系統</span><span style="color:var(--dim-2);">›</span></div>
+        <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">系統使用須知</span><span style="color:var(--dim-2);">›</span></div>
       </div>
     </section>
   </main>
 
-  <!-- 4 欄式 Tab Bar -->
   <nav class="tabbar">
     <div class="tab-item active" data-tab="home" onclick="showTab('home')">
       <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-6 8 6v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg>
@@ -507,16 +392,6 @@ document.getElementById('profileMeta').textContent = userData.unit_name + ' · '
 document.getElementById('profUnit').textContent = userData.unit_name + ' (' + userData.unit + ')';
 document.getElementById('profRole').textContent = userData.role || 'ADMIN';
 document.getElementById('profSyncTime').textContent = syncTimeStr;
-
-function handleAdminToggle(){ 
-  window.top.location.href = window.top.location.pathname + '?action=toggle_admin'; 
-}
-
-function handleLogout(){ 
-  if(confirm('確定要登出乘務系統嗎？')){ 
-    window.top.location.href = window.top.location.pathname + '?action=logout'; 
-  } 
-}
 
 document.getElementById('statusTxt').textContent = statusData.status_text;
 document.getElementById('heroCycle').textContent = statusData.current_cycle;
