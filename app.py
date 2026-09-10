@@ -1,69 +1,84 @@
+"""
+CREW DUTY ENGINE V2 - Main Streamlit Application Entrypoint
+100% 動態資料注入、使用者/管理者切換、純滿版無縫 UI
+"""
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 核心模組算力導入
-from modules.utils import format_day_duty_to_v2
-from modules.services import get_current_duty_status, process_uploaded_excel
+from modules.services import parse_master_excel, build_exchange_candidates_dynamic
 
-# 1. 視口與頁面配置
+# 1. 頁面初始化
 st.set_page_config(
-    page_title="CREW DUTY ENGINE V2",
+    page_title="CREW DUTY ENGINE — Dispatch Terminal",
     page_icon="🚆",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# 2. Session State 全域狀態初始化
+# 2. 全域 Session State 狀態初始化
+if "all_rosters" not in st.session_state:
+    st.session_state.all_rosters = {}
+if "current_emp_id" not in st.session_state:
+    st.session_state.current_emp_id = "A026047"
 if "current_unit_code" not in st.session_state:
     st.session_state.current_unit_code = "TTN"
 if "current_unit_name" not in st.session_state:
-    st.session_state.current_unit_name = "台中乘務區"
+    st.session_state.current_unit_name = "北轉"
 if "last_sync_time" not in st.session_state:
     st.session_state.last_sync_time = "2026-09-05 20:40"
-if "user_info" not in st.session_state:
-    st.session_state.user_info = {
-        "emp_id": "A026047",
-        "name": "江立夫",
-        "title": "車務幹部/組員",
-        "role": "ADMIN"
-    }
+if "user_role" not in st.session_state:
+    st.session_state.user_role = "ADMIN"  # ADMIN / CREW
 
-# 3. 側邊欄抽屜：大表上傳與系統管理面板
+# 3. 側邊欄：管理者與組員切換系統抽屜
 with st.sidebar:
-    st.title("⚙️ 乘務大表管理")
-    st.caption(f"管理者：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+    st.title("⚙️ 乘務調度後台控制台")
+    st.caption("CREW DUTY ENGINE V2 · System Management")
     st.divider()
 
-    st.subheader("📤 上傳乘務大表 Excel")
-    uploaded_file = st.file_uploader("選擇班表檔案 (.xls 或 .xlsx)", type=["xls", "xlsx"])
+    # 權限切換
+    role_option = st.radio("系統權限切換", ["👑 系統管理者 (ADMIN)", "🚆 一般乘務組員 (CREW)"], index=0)
+    st.session_state.user_role = "ADMIN" if "ADMIN" in role_option else "CREW"
 
-    if uploaded_file is not None:
-        success, msg, df, (unit_code, unit_name) = process_uploaded_excel(uploaded_file)
-        if success:
-            st.success(msg)
-            st.session_state.current_unit_code = unit_code
-            st.session_state.current_unit_name = unit_name
-            st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-            st.subheader("📊 班表資料庫預覽")
-            st.dataframe(df.head(10), use_container_width=True)
-        else:
-            st.error(msg)
+    if st.session_state.user_role == "ADMIN":
+        st.subheader("📤 乘務大表動態解析上傳")
+        uploaded_file = st.file_uploader("上傳月度班表 Excel (.xls, .xlsx)", type=["xls", "xlsx"])
+        
+        if uploaded_file is not None:
+            success, rosters, df, (u_code, u_name) = parse_master_excel(uploaded_file)
+            if success and rosters:
+                st.session_state.all_rosters = rosters
+                st.session_state.current_unit_code = u_code
+                st.session_state.current_unit_name = u_name
+                st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+                st.session_state.current_emp_id = list(rosters.keys())[0]
+                st.success(f"成功動態解析【{u_name} ({u_code})】大表！共 {len(rosters)} 位組員。")
+                st.dataframe(df.head(10), use_container_width=True)
+            else:
+                st.error("大表解析失敗，請檢查檔案格式。")
+
+    # 人員動態切換（上傳大表後自動填入）
+    st.divider()
+    st.subheader("👤 模擬登入 / 切換檢視組員")
+    if st.session_state.all_rosters:
+        emp_options = {f"{info['name']} ({emp}) - {info['role_title']}": emp for emp, info in st.session_state.all_rosters.items()}
+        selected_label = st.selectbox("選擇要檢视的組員班表", list(emp_options.keys()))
+        st.session_state.current_emp_id = emp_options[selected_label]
+    else:
+        st.info("尚未上傳大表，目前以系統預設預覽員編展示。")
 
     st.divider()
     st.metric("當前大表基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
-    st.metric("資料庫同步時間", st.session_state.last_sync_time)
+    st.metric("最後同步時間", st.session_state.last_sync_time)
 
-# 4. 精確滿版防跑位 CSS + 釋放側邊欄開關按鈕
+# 4. Streamlit 外框 CSS 修正（完全釋放頂部與滿版，保留左上角選單鈕）
 st.markdown(
     """
     <style>
-    /* 隱藏原生 Streamlit 頁首與頁尾，僅保留側邊欄開關 (Sidebar Control Button) */
     [data-testid="stHeader"] { background: transparent !important; height: 0px !important; }
     [data-testid="stToolbar"], footer { display: none !important; }
 
-    /* 將側邊欄開關按鈕定位於左上角，呈現深色膠囊質感 */
     [data-testid="stSidebarCollapsedControl"], button[aria-label="Open sidebar"] {
         position: fixed !important;
         top: 10px !important;
@@ -94,58 +109,46 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 5. 前台 UI 資料組裝
-backend_user_info = {
-    "emp_id": st.session_state.user_info["emp_id"],
-    "name": st.session_state.user_info["name"],
+# 5. 抓取當前選擇組員班表與換班對象
+current_crew = st.session_state.all_rosters.get(st.session_state.current_emp_id, {
+    "emp_id": st.session_state.current_emp_id,
+    "name": "江立夫",
+    "role_title": "車務幹部/組員",
     "unit": st.session_state.current_unit_code,
     "unit_name": st.session_state.current_unit_name,
-    "title": st.session_state.user_info["title"],
-    "role": st.session_state.user_info["role"]
-}
+    "role": st.session_state.user_role,
+    "schedule": [
+        {"d": 9, "wd": "日", "code": "NH1005", "start": "05:51", "end": "13:51", "dur": "8h00m", "rest": "11.0h", "restTag": "green", "tags": []},
+        {"d": 10, "wd": "一", "code": "NF0018", "start": "07:24", "end": "15:24", "dur": "8h00m", "rest": "16.0h", "restTag": "green", "tags": []},
+        {"d": 11, "wd": "二", "code": "NG0001", "start": "05:26", "end": "15:06", "dur": "9h40m", "rest": "23.5h", "restTag": "green", "tags": ["工時>8.5h"]},
+        {"d": 12, "wd": "三", "code": "NH0543", "start": "14:34", "end": "24:16", "dur": "9h42m", "tags": ["工時>8.5h"]},
+        {"d": 13, "wd": "四", "off": "DO1", "barType": "off", "tags": ["休假日"]},
+        {"d": 14, "wd": "五", "off": "DO3X", "barType": "off", "tags": ["休假日"]}
+    ]
+})
 
-now = datetime.now()
-t_day1 = now + timedelta(days=1)
-t_day2 = now + timedelta(days=2)
-t_day3 = now + timedelta(days=3)
+user_sched = current_crew.get("schedule", [])
+week1 = user_sched[:7]
+week2 = user_sched[7:14]
+week3 = user_sched[14:21]
 
-raw_schedule_data = [
-    {"date_info": {"day": now.day, "weekday": "今", "full_date": now.strftime("%Y-%m-%d")}, "duty_code": "DO1"},
-    {"date_info": {"day": t_day1.day, "weekday": "明", "full_date": t_day1.strftime("%Y-%m-%d")}, "duty_code": "NG0001", "start_time": "07:24", "end_time": "15:24", "duration_str": "8h00m", "prev_end_time": "20:00"},
-    {"date_info": {"day": t_day2.day, "weekday": "後", "full_date": t_day2.strftime("%Y-%m-%d")}, "duty_code": "NH0543", "start_time": "14:34", "end_time": "24:16", "duration_str": "9h42m", "prev_end_time": "15:24"},
-    {"date_info": {"day": t_day3.day, "weekday": "大後", "full_date": t_day3.strftime("%Y-%m-%d")}, "duty_code": "DO3X"},
-]
+formatted_schedule = {"week1": week1, "week2": week2, "week3": week3}
 
-processed_week = [format_day_duty_to_v2(**item) for item in raw_schedule_data]
+# 計算動態換班快搜對象
+dynamic_exchange = build_exchange_candidates_dynamic(st.session_state.all_rosters)
 
-for idx, item in enumerate(raw_schedule_data):
-    processed_week[idx]["full_date"] = item["date_info"]["full_date"]
-
-duty_status = get_current_duty_status(processed_week)
-backend_schedule = {"week1": processed_week, "week2": [], "week3": []}
-
-backend_exchange_candidates = {
-    "服勤員": [
-        {"id": "A024118", "name": "林彥廷", "start": "06:01", "end": "16:01", "dur": "10h00m", "restBefore": "13.2h", "restTag": "green", "streak": "連續值勤 2 日"},
-        {"id": "A021987", "name": "陳淨怡", "start": "07:30", "end": "16:30", "dur": "9h00m", "restBefore": "9.8h", "restTag": "red", "streak": "連續值勤 5 日 · 前一班間隔不足"},
-    ],
-    "駕駛": [
-        {"id": "A011203", "name": "李國安", "start": "05:10", "end": "13:40", "dur": "8h30m", "restBefore": "15.0h", "restTag": "green", "streak": "連續值勤 1 日"}
-    ],
-    "列車長": []
-}
-
+# 6. 100% 忠實套用 crew-duty-engine-redesign.html 前端 HTML 範本
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>CREW DUTY ENGINE V2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>CREW DUTY ENGINE — Redesign Concept</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+TC:wght@400;500;600;700&display=swap');
 
-:root {
+:root{
   --ink-900:#070B10; --ink-800:#0E141C; --ink-700:#141C26; --ink-600:#1B2530;
   --line:#232E3A; --line-soft:#1A222C; --paper:#ECF1F5; --dim:#8492A1; --dim-2:#59636E;
   --blue:#4C9AE0; --blue-dim:rgba(76,154,224,0.13); --amber:#E3A13D; --amber-dim:rgba(227,161,61,0.14);
@@ -154,334 +157,393 @@ RAW_HTML_TEMPLATE = """
 }
 
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;background:var(--ink-900);color:var(--paper);font-family:'IBM Plex Sans TC','IBM Plex Mono',sans-serif;-webkit-font-smoothing:antialiased;height:100%;overflow:hidden;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--ink-900); color:var(--paper);
+  font-family:'IBM Plex Sans TC','IBM Plex Mono',sans-serif;
+  -webkit-font-smoothing:antialiased; min-height:100vh;
+}
 .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
 
-.app{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;position:relative;background:var(--ink-900);}
-.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px 48px;background:rgba(7,11,16,0.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(35,46,58,0.5);}
-.brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue);font-family:monospace;}
-.brand-name{font-size:13px;font-weight:600;color:var(--paper);}
-.unit-chip{display:flex;align-items:center;gap:6px;background:var(--ink-700);border:1px solid var(--line);padding:6px 10px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--paper);font-family:monospace;cursor:pointer;}
-.unit-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green);}
+.app{
+  max-width:480px; margin:0 auto; min-height:100vh;
+  display:flex; flex-direction:column; position:relative;
+  background:
+    radial-gradient(1200px 400px at 50% -120px, rgba(76,154,224,0.08), transparent 60%),
+    var(--ink-900);
+}
 
-main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overflow-y:auto;}
-.screen{display:none;}
+.topbar{
+  position:sticky; top:0; z-index:20;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px 10px 48px;
+  background:linear-gradient(var(--ink-900) 70%, transparent);
+}
+.brand{display:flex; align-items:center; gap:9px;}
+.brand-mark{
+  width:26px;height:26px;border-radius:6px;
+  background:var(--ink-700); border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--blue);
+  font-family:'IBM Plex Mono',monospace;
+}
+.brand-name{font-size:13px;font-weight:600;letter-spacing:0.3px;color:var(--paper);}
+.brand-sub{font-size:9.5px;color:var(--dim-2);margin-top:1px;}
+
+.unit-chip{
+  display:flex;align-items:center;gap:6px;
+  background:var(--ink-700); border:1px solid var(--line);
+  padding:6px 10px 6px 12px; border-radius:8px;
+  font-size:12.5px;font-weight:600; color:var(--paper);
+  font-family:'IBM Plex Mono',monospace;
+}
+.unit-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
+
+main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
+.screen{display:none; animation:fadeIn 0.28s ease;}
 .screen.active{display:block;}
+@keyframes fadeIn{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;}}
 
-.section-label{font-size:11px;color:var(--dim-2);font-weight:600;margin:16px 2px 8px;}
-.section-label:first-child{margin-top:2px;}
-.panel{border:1px solid var(--line);border-radius:12px;background:var(--ink-800);padding:2px 12px;margin-bottom:12px;}
+.section-label{
+  font-size:11px; color:var(--dim-2); font-weight:600;
+  letter-spacing:0.2px; margin:22px 2px 10px;
+}
+.section-label:first-child{margin-top:6px;}
 
 .hero{
   border:1px solid var(--line); border-radius:14px;
   background:linear-gradient(165deg, var(--ink-700), var(--ink-800));
-  padding:18px 16px; margin-bottom:14px; position:relative; overflow:hidden;
+  padding:20px 18px 18px; position:relative; overflow:hidden;
 }
 .hero::before{
-  content:""; position:absolute; right:-40px; top:-40px; width:160px;height:160px;border-radius:50%;
+  content:""; position:absolute; right:-40px; top:-40px;
+  width:160px;height:160px;border-radius:50%;
   background:radial-gradient(circle, rgba(76,154,224,0.16), transparent 70%);
 }
 .hero-top{display:flex;justify-content:space-between;align-items:flex-start;}
 .hero-status{
-  display:inline-flex;align-items:center;gap:6px; font-size:11.5px;color:var(--amber);font-weight:600;
-  background:var(--amber-dim); border:1px solid rgba(227,161,61,0.35); padding:4px 9px;border-radius:20px;
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;color:var(--amber);font-weight:600;
+  background:var(--amber-dim); border:1px solid rgba(227,161,61,0.35);
+  padding:4px 9px;border-radius:20px;
 }
 .hero-status .dot{width:5px;height:5px;border-radius:50%;background:var(--amber);}
-.hero-cycle{font-size:10.5px;color:var(--dim-2);font-family:'IBM Plex Mono',monospace;}
 
-.hero-label{font-size:12px;color:var(--dim);margin-top:14px;}
 .countdown{display:flex;align-items:baseline;gap:10px;margin-top:6px;}
-.countdown .num{ font-family:'IBM Plex Mono',monospace; font-size:36px;font-weight:600;letter-spacing:0.5px;color:var(--paper); line-height:1; }
+.countdown .num{
+  font-family:'IBM Plex Mono',monospace; font-size:40px;font-weight:600;letter-spacing:0.5px;color:var(--paper); line-height:1;
+}
 .countdown .unit{font-size:12px;color:var(--dim-2);}
-.hero-next{ margin-top:14px;padding-top:12px;border-top:1px solid var(--line); display:flex;justify-content:space-between;align-items:center; }
+.hero-next{
+  margin-top:14px;padding-top:14px;border-top:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center;
+}
 .hero-next-left{display:flex;flex-direction:column;gap:2px;}
-.hero-next-date{font-size:12px;color:var(--dim);}
-.hero-next-times{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:var(--paper);}
-.hero-next-code{ font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--blue); background:var(--blue-dim);border:1px solid rgba(76,154,224,0.3); padding:4px 8px;border-radius:8px;font-weight:600; }
+.hero-next-times{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;color:var(--paper);}
+.hero-next-code{
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--blue);
+  background:var(--blue-dim);border:1px solid rgba(76,154,224,0.3);
+  padding:5px 10px;border-radius:8px;font-weight:600;
+}
 
-.duty-row{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--line-soft);cursor:pointer;}
+.action-row{
+  display:flex; align-items:center; gap:12px;
+  padding:14px 4px; border-bottom:1px solid var(--line-soft);
+  cursor:pointer;
+}
+.action-row:last-child{border-bottom:none;}
+.action-body{flex:1;min-width:0;}
+.action-title{font-size:14px;font-weight:600;color:var(--paper);}
+.action-sub{font-size:11.5px;color:var(--dim-2);margin-top:1px;}
+.action-chev{color:var(--dim-2);}
+
+.panel{
+  border:1px solid var(--line); border-radius:12px;
+  background:var(--ink-800); padding:4px 14px;
+}
+
+.week-head{
+  display:flex;justify-content:space-between;align-items:baseline;
+  padding:12px 2px 8px; margin-top:4px;
+}
+.week-head .w-title{font-size:12px;font-weight:600;color:var(--dim);}
+
+.duty-row{
+  display:flex;align-items:center;gap:12px; padding:11px 2px;
+  border-bottom:1px solid var(--line-soft); cursor:pointer;
+}
 .duty-row:last-child{border-bottom:none;}
-.duty-date{width:36px;text-align:center;}
-.duty-date .d{font-family:monospace;font-size:15px;font-weight:600;color:var(--paper);}
-.duty-date .w{font-size:9.5px;color:var(--dim-2);}
-.duty-bar{width:3px;align-self:stretch;border-radius:3px;background:var(--blue);}
+.duty-date{width:38px;flex:none;text-align:center;}
+.duty-date .d{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:var(--paper);line-height:1.1;}
+.duty-date .w{font-size:9.5px;color:var(--dim-2);margin-top:1px;}
+.duty-bar{width:3px;align-self:stretch;border-radius:3px;flex:none;background:var(--blue);}
 .duty-bar.off{background:var(--red);}
-.duty-main{flex:1;}
-.duty-times{font-family:monospace;font-size:14px;font-weight:600;}
-.duty-meta{font-size:10.5px;color:var(--dim-2);margin-top:2px;display:flex;gap:8px;}
-.tag{font-size:9px;font-weight:600;padding:2px 5px;border-radius:4px;white-space:nowrap;}
+.duty-main{flex:1;min-width:0;}
+.duty-times{
+  font-family:'IBM Plex Mono',monospace;font-size:14.5px;font-weight:600;color:var(--paper);
+  display:flex; align-items:center; gap:6px;
+}
+.duty-off-label{font-size:13.5px;font-weight:600;color:var(--red);}
+.duty-meta{font-size:11px;color:var(--dim-2);margin-top:2px;display:flex;gap:8px;align-items:center;}
+
+.tag{
+  font-size:9.5px;font-weight:600;padding:2.5px 6px;border-radius:5px;
+  white-space:nowrap; font-family:'IBM Plex Sans TC',sans-serif;
+}
 .tag.amber{color:var(--amber);background:var(--amber-dim);}
 .tag.red{color:var(--red);background:var(--red-dim);}
+.tag.green{color:var(--green);background:var(--green-dim);}
 
-.legend-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 2px 0; }
-.legend-chip { font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center; }
-.legend-chip.grey { color: #8A98A8; background: rgba(122,135,148,0.18); border: 1px solid rgba(122,135,148,0.25); }
-.legend-chip.red { color: var(--red); background: var(--red-dim); border: 1px solid rgba(225,97,92,0.25); }
-.legend-chip.green { color: var(--green); background: var(--green-dim); border: 1px solid rgba(79,184,138,0.25); }
-.legend-chip.amber { color: var(--amber); background: var(--amber-dim); border: 1px solid rgba(227,161,61,0.25); }
-.legend-chip.purple { color: var(--purple); background: var(--purple-dim); border: 1px solid rgba(155,140,224,0.25); }
+.role-tabs{display:flex; gap:8px; margin-bottom:14px;}
+.role-tab{
+  flex:1; text-align:center; padding:9px 0; border-radius:9px;
+  font-size:13px; font-weight:600; color:var(--dim);
+  background:var(--ink-800); border:1px solid var(--line); cursor:pointer;
+}
+.role-tab.active{color:var(--ink-900); background:var(--blue); border-color:var(--blue);}
 
-.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:rgba(14,20,28,0.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:30;}
-.tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;cursor:pointer;color:var(--dim-2);}
-.tab-item svg{width:18px;height:18px;stroke:var(--dim-2);fill:none;}
-.tab-item span{font-size:9.5px;font-weight:600;}
+.btn{
+  display:block; width:100%; text-align:center; padding:13px; border-radius:10px; border:none;
+  font-size:14.5px; font-weight:600; cursor:pointer; font-family:'IBM Plex Sans TC',sans-serif;
+}
+.btn-primary{background:var(--blue); color:var(--ink-900); margin-top:16px;}
+
+.result-card{
+  border:1px solid var(--line); border-radius:12px; background:var(--ink-800);
+  padding:13px 14px; margin-bottom:10px; cursor:pointer;
+}
+
+.profile-head{display:flex; align-items:center; gap:12px; padding:8px 2px 20px;}
+.avatar{
+  width:48px;height:48px;border-radius:11px; background:var(--ink-700); border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'IBM Plex Mono',monospace; font-weight:700; color:var(--blue); font-size:15px;
+}
+
+.list-row{display:flex; justify-content:space-between; align-items:center; padding:13px 2px; border-bottom:1px solid var(--line-soft);}
+.list-row-label{font-size:13.5px; color:var(--paper);}
+.list-row-value{font-size:12.5px; color:var(--dim-2); font-family:'IBM Plex Mono',monospace;}
+
+.tabbar{
+  position:fixed; bottom:0; left:50%; transform:translateX(-50%);
+  width:100%; max-width:480px; display:flex;
+  background:rgba(14,20,28,0.92); backdrop-filter:blur(10px); border-top:1px solid var(--line);
+  padding:8px 6px calc(8px + env(safe-area-inset-bottom)); z-index:30;
+}
+.tab-item{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;
+  padding:6px 0; cursor:pointer; color:var(--dim-2);
+}
+.tab-item svg{width:19px;height:19px; stroke:var(--dim-2); fill:none;}
+.tab-item span{font-size:10px; font-weight:600;}
 .tab-item.active{color:var(--blue);}
 .tab-item.active svg{stroke:var(--blue);}
-
-.sheet-overlay{position:fixed;inset:0;background:rgba(3,5,8,0.65);display:none;align-items:flex-end;justify-content:center;z-index:50;backdrop-filter:blur(4px);}
-.sheet-overlay.open{display:flex;}
-.sheet{width:100%;max-width:480px;background:var(--ink-800);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:10px 18px calc(20px + env(safe-area-inset-bottom,0px));max-height:80vh;overflow-y:auto;}
-.sheet-handle{width:36px;height:4px;border-radius:3px;background:var(--line);margin:2px auto 14px;}
-.btn{display:block;width:100%;text-align:center;padding:12px;border-radius:9px;border:none;font-size:14px;font-weight:600;cursor:pointer;}
-.btn-primary{background:var(--blue);color:var(--ink-900);}
 </style>
 </head>
 <body>
 <div class="app">
+
   <header class="topbar">
-    <div style="display:flex;align-items:center;gap:9px;">
+    <div class="brand">
       <div class="brand-mark">CD</div>
       <div>
         <div class="brand-name">CREW DUTY ENGINE</div>
-        <div style="font-size:9.5px;color:var(--dim-2);">V2 Modular Architecture</div>
+        <div class="brand-sub">redesign concept · C.L.F</div>
       </div>
     </div>
-    <div class="unit-chip" onclick="openSyncSheet()">
+    <div class="unit-chip">
       <span class="dot"></span>
-      <span id="headerUnit">--</span>
+      <span id="unitText">TTN</span>
     </div>
   </header>
 
-  <main id="mainContainer">
+  <main>
+    <!-- HOME -->
     <section class="screen active" id="screen-home">
       <div class="hero">
         <div class="hero-top">
-          <span class="hero-status" id="heroStatus"><span class="dot"></span><span id="statusTxt">--</span></span>
-          <span class="hero-cycle mono" id="heroCycle">--</span>
+          <span class="hero-status"><span class="dot"></span>今日排休 · DO1</span>
+          <span class="hero-cycle mono">週期 2026-09</span>
         </div>
-        <div class="hero-label">距下次出勤簽到</div>
+        <div style="font-size:12px;color:var(--dim);margin-top:16px;">距下次出勤簽到</div>
         <div class="countdown">
-          <span class="num" id="cd-h">00</span><span class="unit">時</span>
-          <span class="num" id="cd-m">00</span><span class="unit">分</span>
-          <span class="num" id="cd-s">00</span><span class="unit">秒</span>
+          <span class="num" id="cd-h">03</span><span class="unit">時</span>
+          <span class="num" id="cd-m">22</span><span class="unit">分</span>
+          <span class="num" id="cd-s">15</span><span class="unit">秒</span>
         </div>
         <div class="hero-next">
-          <div class="hero-next-left">
-            <div class="hero-next-date" id="nextDate">--</div>
-            <div class="hero-next-times" id="nextTimes">--:-- → --:--</div>
+          <div>
+            <div style="font-size:12px;color:var(--dim);" id="nextDutyTitle">9/17（四）NG1547</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;" id="nextDutyTimes">16:24 → 24:30</div>
           </div>
-          <div class="hero-next-code" id="nextCode">--</div>
+          <div class="hero-next-code" id="nextDutyDur">8h06m</div>
         </div>
-      </div>
-
-      <div class="section-label">目前登入組員</div>
-      <div class="panel" style="padding:12px 14px;">
-        <div style="font-size:18px;font-weight:700;" id="userName">--</div>
-        <div style="font-size:12px;color:var(--dim-2);font-family:monospace;margin-top:2px;" id="userMeta">--</div>
       </div>
 
       <div class="section-label">快速功能</div>
-      <div class="panel" style="padding:4px 12px;">
-        <div class="duty-row" onclick="showTab('schedule')">
-          <div style="font-size:14px;font-weight:600;flex:1;">我的班表 (Modules 算力驅動)</div>
-          <span style="color:var(--dim-2);">›</span>
+      <div class="panel">
+        <div class="action-row" onclick="showTab('schedule')">
+          <div class="action-body"><div class="action-title">我的月班表</div><div class="action-sub">逐日清單・含班間合規標示</div></div>
+          <span class="action-chev">›</span>
         </div>
-        <div class="duty-row" onclick="showTab('exchange')">
-          <div style="font-size:14px;font-weight:600;flex:1;">換班快搜</div>
-          <span style="color:var(--dim-2);">›</span>
+        <div class="action-row" onclick="showTab('exchange')">
+          <div class="action-body"><div class="action-title">換班快搜</div><div class="action-sub">依 Sign-in 時間窗篩選可換組員</div></div>
+          <span class="action-chev">›</span>
         </div>
       </div>
     </section>
 
+    <!-- SCHEDULE -->
     <section class="screen" id="screen-schedule">
-      <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
-      <div class="legend-bar">
-        <span class="legend-chip grey">偏駐</span>
-        <span class="legend-chip red">休假日</span>
-        <span class="legend-chip green">特休</span>
-        <span class="legend-chip amber">工時 &gt; 8.5h</span>
-        <span class="legend-chip amber">國定假日</span>
-        <span class="legend-chip purple">破輪</span>
-        <span class="legend-chip grey">非正線勤務</span>
-      </div>
-      <div class="panel" id="scheduleContainer"></div>
+      <div class="section-label" style="margin-top:6px;" id="schedTitle">我的月班表</div>
+      <div class="week-head"><span class="w-title">第 1 週</span></div>
+      <div class="panel" id="week1"></div>
+      <div class="week-head"><span class="w-title">第 2 週</span></div>
+      <div class="panel" id="week2"></div>
+      <div class="week-head"><span class="w-title">第 3 週</span></div>
+      <div class="panel" id="week3"></div>
     </section>
 
+    <!-- EXCHANGE -->
     <section class="screen" id="screen-exchange">
-      <div class="section-label" style="margin-top:2px;">換班快搜名單</div>
-      <div class="panel" id="exchangeContainer"></div>
+      <div class="section-label" style="margin-top:6px;">換班快搜</div>
+      <div class="role-tabs">
+        <div class="role-tab active" onclick="filterRole('服勤員', this)">服勤員</div>
+        <div class="role-tab" onclick="filterRole('駕駛', this)">駕駛</div>
+        <div class="role-tab" onclick="filterRole('列車長', this)">列車長</div>
+      </div>
+      <div id="searchResults"></div>
     </section>
 
+    <!-- PROFILE -->
     <section class="screen" id="screen-profile">
-      <div style="display:flex;align-items:center;gap:12px;padding:6px 2px 16px;">
-        <div style="width:44px;height:44px;border-radius:10px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:monospace;font-weight:700;color:var(--blue);font-size:15px;" id="profileAvatar">--</div>
+      <div class="profile-head">
+        <div class="avatar" id="profAvatar">江</div>
         <div>
-          <div style="font-size:15px;font-weight:600;" id="profileName">--</div>
-          <div style="font-size:11px;color:var(--dim-2);margin-top:2px;font-family:monospace;" id="profileMeta">--</div>
+          <div style="font-size:15px;font-weight:600;" id="profName">江立夫</div>
+          <div style="font-size:11.5px;color:var(--dim-2);font-family:monospace;" id="profMeta">A026047 · TTN</div>
         </div>
       </div>
-
-      <div class="section-label">帳號與權限</div>
-      <div class="panel" style="padding:4px 12px;">
-        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">所屬單位</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profUnit">--</span></div>
-        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">權限層級</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profRole">ADMIN</span></div>
-        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">大表同步時間</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profSyncTime">--</span></div>
-      </div>
-
-      <div class="section-label">系統資訊與設定</div>
-      <div class="panel" style="padding:4px 12px;">
-        <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">問題回報與建議</span><span style="color:var(--dim-2);">›</span></div>
-        <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">系統使用須知</span><span style="color:var(--dim-2);">›</span></div>
+      <div class="panel">
+        <div class="list-row"><span class="list-row-label">所屬單位</span><span class="list-row-value" id="profUnit">北轉 (TTN)</span></div>
+        <div class="list-row"><span class="list-row-label">同步時間</span><span class="list-row-value" id="profSync">2026-09-05 20:40</span></div>
       </div>
     </section>
   </main>
 
   <nav class="tabbar">
     <div class="tab-item active" data-tab="home" onclick="showTab('home')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-6 8 6v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" fill="none" stroke="currentColor"><path d="M4 11l8-6 8 6v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg>
       <span>今日</span>
     </div>
     <div class="tab-item" data-tab="schedule" onclick="showTab('schedule')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
       <span>我的班表</span>
     </div>
     <div class="tab-item" data-tab="exchange" onclick="showTab('exchange')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11M18 7l-3-3M18 7l-3 3M17 17H6M6 17l3 3M6 17l3-3"/></svg>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" fill="none" stroke="currentColor"><path d="M7 7h11M18 7l-3-3M18 7l-3 3M17 17H6M6 17l3 3M6 17l3-3"/></svg>
       <span>換班快搜</span>
     </div>
     <div class="tab-item" data-tab="profile" onclick="showTab('profile')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M4.5 20c1.5-4 4.5-6 7.5-6s6 2 7.5 6"/></svg>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="3.4"/><path d="M4.5 20c1.5-4 4.5-6 7.5-6s6 2 7.5 6"/></svg>
       <span>我的</span>
     </div>
   </nav>
-
-  <div class="sheet-overlay" id="sheetOverlay" onclick="closeSheetOnBg(event)">
-    <div class="sheet" id="sheet"></div>
-  </div>
 </div>
 
 <script>
-const userData = __USER_DATA__;
-const scheduleData = __SCHEDULE_DATA__;
-const exchangeData = __EXCHANGE_DATA__;
-const statusData = __STATUS_DATA__;
-const syncTimeStr = "__LAST_SYNC_TIME__";
+const crewData = __CREW_JSON__;
+const scheduleData = __SCHEDULE_JSON__;
+const exchangeData = __EXCHANGE_JSON__;
 
-document.getElementById('headerUnit').textContent = userData.unit + ' · 已同步';
-document.getElementById('userName').textContent = userData.name + ' (' + userData.emp_id + ')';
-document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + userData.title;
+document.getElementById('unitText').textContent = crewData.unit;
+document.getElementById('schedTitle').textContent = `我的月班表 · ${crewData.emp_id} ${crewData.name}`;
+document.getElementById('profAvatar').textContent = crewData.name ? crewData.name.charAt(0) : 'CD';
+document.getElementById('profName').textContent = crewData.name;
+document.getElementById('profMeta').textContent = `${crewData.emp_id} · ${crewData.unit} · ${crewData.role_title}`;
+document.getElementById('profUnit').textContent = `${crewData.unit_name} (${crewData.unit})`;
+document.getElementById('profSync').textContent = "__SYNC_TIME__";
 
-document.getElementById('profileAvatar').textContent = userData.name ? userData.name.charAt(0) : 'CD';
-document.getElementById('profileName').textContent = userData.name + ' (' + userData.emp_id + ')';
-document.getElementById('profileMeta').textContent = userData.unit_name + ' · ' + userData.title;
-document.getElementById('profUnit').textContent = userData.unit_name + ' (' + userData.unit + ')';
-document.getElementById('profRole').textContent = userData.role || 'ADMIN';
-document.getElementById('profSyncTime').textContent = syncTimeStr;
-
-document.getElementById('statusTxt').textContent = statusData.status_text;
-document.getElementById('heroCycle').textContent = statusData.current_cycle;
-document.getElementById('nextDate').textContent = statusData.next_duty_title;
-document.getElementById('nextTimes').textContent = statusData.next_duty_times;
-document.getElementById('nextCode').textContent = statusData.next_duty_code;
-
-function pad(n){ return String(n).padStart(2,'0'); }
-function updateCountdown(){
-  if(!statusData.target_timestamp_ms) {
-    document.getElementById('cd-h').textContent = "00";
-    document.getElementById('cd-m').textContent = "00";
-    document.getElementById('cd-s').textContent = "00";
-    return;
-  }
-  const now = new Date().getTime();
-  let diff = Math.max(0, statusData.target_timestamp_ms - now);
-  const h = Math.floor(diff / (1000 * 60 * 60));
-  const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-  const s = Math.floor((diff % (1000 * 60)) / 1000);
-  document.getElementById('cd-h').textContent = pad(h);
-  document.getElementById('cd-m').textContent = pad(m);
-  document.getElementById('cd-s').textContent = pad(s);
-}
-updateCountdown();
-setInterval(updateCountdown, 1000);
-
-const schedContainer = document.getElementById('scheduleContainer');
-const days = scheduleData.week1 || [];
-
-schedContainer.innerHTML = days.map(day => {
-  if(day.off) {
+function renderWeek(containerId, days){
+  const el = document.getElementById(containerId);
+  if(!el || !days) return;
+  el.innerHTML = days.map(day => {
+    if(day.off){
+      return `
+        <div class="duty-row">
+          <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
+          <div class="duty-bar off"></div>
+          <div class="duty-main"><div class="duty-off-label">${day.off}</div></div>
+          <span class="tag red">休假日</span>
+        </div>`;
+    }
+    const tagsHtml = (day.tags||[]).map(t => `<span class="tag amber">${t}</span>`).join(' ');
+    const restHtml = day.rest ? `<span style="color:var(--${day.restTag==='red'?'red':day.restTag==='amber'?'amber':'green'})">班間 ${day.rest}</span>` : '';
     return `
       <div class="duty-row">
         <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
-        <div class="duty-bar off"></div>
-        <div class="duty-main"><div style="color:var(--red);font-weight:600;font-size:13.5px;">${day.off}</div></div>
-        <span class="tag red">休假日</span>
+        <div class="duty-bar"></div>
+        <div class="duty-main">
+          <div class="duty-times">${day.start} → ${day.end}</div>
+          <div class="duty-meta"><span>${day.code}</span><span>${day.dur}</span>${restHtml}</div>
+        </div>
+        <div>${tagsHtml}</div>
       </div>`;
-  }
-  const tagsHtml = (day.tags||[]).map(t => `<span class="tag amber">${t}</span>`).join(' ');
-  const restHtml = day.rest ? `<span style="color:var(--${day.restTag==='red'?'red':day.restTag==='amber'?'amber':'green'})">班間 ${day.rest}</span>` : '';
-  
-  return `
-    <div class="duty-row">
-      <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
-      <div class="duty-bar"></div>
-      <div class="duty-main">
-        <div class="duty-times mono">${day.start} → ${day.end}</div>
-        <div class="duty-meta"><span>${day.code}</span><span>${day.dur}</span>${restHtml}</div>
-      </div>
-      <div>${tagsHtml}</div>
-    </div>`;
-}).join('');
+  }).join('');
+}
 
-const exContainer = document.getElementById('exchangeContainer');
-const candidates = exchangeData['服勤員'] || [];
-exContainer.innerHTML = candidates.map(c => `
-  <div class="duty-row">
-    <div class="duty-main">
-      <div style="font-size:14px;font-weight:600;">${c.name} <span style="font-size:11px;color:var(--dim-2);" class="mono">(${c.id})</span></div>
-      <div class="duty-times mono" style="margin-top:2px;">${c.start} → ${c.end}</div>
-      <div style="font-size:10.5px;color:var(--dim-2);margin-top:2px;">${c.streak} · 前班間隔 ${c.restBefore}</div>
+renderWeek('week1', scheduleData.week1);
+renderWeek('week2', scheduleData.week2);
+renderWeek('week3', scheduleData.week3);
+
+function filterRole(role, btn){
+  document.querySelectorAll('.role-tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  renderExchange(role);
+}
+
+function renderExchange(role){
+  const container = document.getElementById('searchResults');
+  const pool = exchangeData[role] || [];
+  if(pool.length === 0){
+    container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--dim-2);">此職務目前無可換班組員資料</div>`;
+    return;
+  }
+  container.innerHTML = pool.map(c => `
+    <div class="result-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div class="mono" style="font-size:11px;color:var(--dim-2);">${c.id}</div>
+          <div style="font-size:14px;font-weight:600;">${c.name}</div>
+        </div>
+        <span class="tag ${c.restTag}">${c.restBefore}</span>
+      </div>
+      <div class="mono" style="font-size:18px;font-weight:600;margin-top:6px;">${c.start} → ${c.end}</div>
+      <div style="font-size:11px;color:var(--dim-2);margin-top:4px;">${c.streak}</div>
     </div>
-  </div>
-`).join('');
+  `).join('');
+}
+renderExchange('服勤員');
 
 function showTab(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.tab-item').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
-  document.getElementById('mainContainer').scrollTop = 0;
 }
-
-function openSyncSheet(){
-  const sheet = document.getElementById('sheet');
-  sheet.innerHTML = `
-    <div class="sheet-handle"></div>
-    <div style="font-size:16px;font-weight:700;color:var(--paper);">大表同步資訊</div>
-    <div style="font-size:12px;color:var(--dim-2);margin:4px 0 16px;">當前基地：${userData.unit_name} (${userData.unit})</div>
-    <div style="background:var(--ink-700);padding:12px;border-radius:10px;border:1px solid var(--line);font-size:12.5px;color:var(--dim);">
-      資料庫最後更新：${syncTimeStr}<br>
-      目前狀態：<span style="color:var(--green);font-weight:600;">已是最新大表版本</span>
-    </div>
-    <button class="btn btn-primary" style="margin-top:16px;" onclick="closeSheet()">關閉視窗</button>
-  `;
-  document.getElementById('sheetOverlay').classList.add('open');
-}
-function closeSheet(){ document.getElementById('sheetOverlay').classList.remove('open'); }
-function closeSheetOnBg(e){ if(e.target.id==='sheetOverlay') closeSheet(); }
 </script>
 </body>
 </html>
 """
 
+# 安全注入 JSON 資料至 HTML 模板
 HTML_CODE = RAW_HTML_TEMPLATE.replace(
-    "__USER_DATA__", json.dumps(backend_user_info, ensure_ascii=False)
+    "__CREW_JSON__", json.dumps(current_crew, ensure_ascii=False)
 ).replace(
-    "__SCHEDULE_DATA__", json.dumps(backend_schedule, ensure_ascii=False)
+    "__SCHEDULE_JSON__", json.dumps(formatted_schedule, ensure_ascii=False)
 ).replace(
-    "__EXCHANGE_DATA__", json.dumps(backend_exchange_candidates, ensure_ascii=False)
+    "__EXCHANGE_JSON__", json.dumps(dynamic_exchange, ensure_ascii=False)
 ).replace(
-    "__STATUS_DATA__", json.dumps(duty_status, ensure_ascii=False)
-).replace(
-    "__LAST_SYNC_TIME__", st.session_state.last_sync_time
+    "__SYNC_TIME__", st.session_state.last_sync_time
 )
 
 components.html(HTML_CODE, height=1000, scrolling=False)
