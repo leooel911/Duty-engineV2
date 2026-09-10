@@ -2,7 +2,7 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 1. 載入第一步與第二步建立的核心模組
+# 1. 載入核心模組
 from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
 
@@ -50,7 +50,6 @@ raw_schedule_data = [
     {"date_info": {"day": 14, "weekday": "五", "full_date": "2026-09-14"}, "duty_code": "DO3X"},
 ]
 
-# 透過 Python utils 運算出符合合規標籤與格式的資料
 processed_week1 = [format_day_duty_to_v2(**item) for item in raw_schedule_data]
 
 backend_schedule = {
@@ -79,9 +78,9 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (注入 Python JSON)
+# 4. 全介面 HTML / CSS / JS 模板 (使用 .replace 安全注入 JSON)
 # ---------------------------------------------------------
-HTML_CODE = f"""
+RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -91,62 +90,62 @@ HTML_CODE = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+TC:wght@400;500;600;700&display=swap');
 
-:root{{
+:root {
   --ink-900:#070B10; --ink-800:#0E141C; --ink-700:#141C26; --ink-600:#1B2530;
   --line:#232E3A; --line-soft:#1A222C; --paper:#ECF1F5; --dim:#8492A1; --dim-2:#59636E;
   --blue:#4C9AE0; --blue-dim:rgba(76,154,224,0.13); --amber:#E3A13D; --amber-dim:rgba(227,161,61,0.14);
   --red:#E1615C; --red-dim:rgba(225,97,92,0.14); --green:#4FB88A; --green-dim:rgba(79,184,138,0.14);
   --purple:#9B8CE0; --purple-dim:rgba(155,140,224,0.14); --grey:#7A8794; --grey-dim:rgba(122,135,148,0.14);
-}}
+}
 
-*{{box-sizing:border-box;}}
-html,body{{margin:0;padding:0;background:var(--ink-900);color:var(--paper);font-family:'IBM Plex Sans TC','IBM Plex Mono',sans-serif;-webkit-font-smoothing:antialiased;height:100%;overflow:hidden;}}
-.mono{{font-family:'IBM Plex Mono',monospace;}}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--ink-900);color:var(--paper);font-family:'IBM Plex Sans TC','IBM Plex Mono',sans-serif;-webkit-font-smoothing:antialiased;height:100%;overflow:hidden;}
+.mono{font-family:'IBM Plex Mono',monospace;}
 
-.app{{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;position:relative;background:var(--ink-900);}}
-.topbar{{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:rgba(7,11,16,0.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(35,46,58,0.5);}}
-.brand-mark{{width:26px;height:26px;border-radius:6px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue);font-family:monospace;}}
-.brand-name{{font-size:13px;font-weight:600;color:var(--paper);}}
-.unit-chip{{display:flex;align-items:center;gap:6px;background:var(--ink-700);border:1px solid var(--line);padding:6px 10px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--paper);font-family:monospace;cursor:pointer;}}
-.unit-chip .dot{{width:6px;height:6px;border-radius:50%;background:var(--green);}}
+.app{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;position:relative;background:var(--ink-900);}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:rgba(7,11,16,0.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(35,46,58,0.5);}
+.brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue);font-family:monospace;}
+.brand-name{font-size:13px;font-weight:600;color:var(--paper);}
+.unit-chip{display:flex;align-items:center;gap:6px;background:var(--ink-700);border:1px solid var(--line);padding:6px 10px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--paper);font-family:monospace;cursor:pointer;}
+.unit-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green);}
 
-main{{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overflow-y:auto;}}
-.screen{{display:none;}}
-.screen.active{{display:block;}}
+main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overflow-y:auto;}
+.screen{display:none;}
+.screen.active{display:block;}
 
-.section-label{{font-size:11px;color:var(--dim-2);font-weight:600;margin:16px 2px 8px;}}
-.panel{{border:1px solid var(--line);border-radius:12px;background:var(--ink-800);padding:2px 12px;margin-bottom:12px;}}
+.section-label{font-size:11px;color:var(--dim-2);font-weight:600;margin:16px 2px 8px;}
+.panel{border:1px solid var(--line);border-radius:12px;background:var(--ink-800);padding:2px 12px;margin-bottom:12px;}
 
 /* Duty Row */
-.duty-row{{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--line-soft);cursor:pointer;}}
-.duty-row:last-child{{border-bottom:none;}}
-.duty-date{{width:36px;text-align:center;}}
-.duty-date .d{{font-family:monospace;font-size:15px;font-weight:600;color:var(--paper);}}
-.duty-date .w{{font-size:9.5px;color:var(--dim-2);}}
-.duty-bar{{width:3px;align-self:stretch;border-radius:3px;background:var(--blue);}}
-.duty-bar.off{{background:var(--red);}}
-.duty-main{{flex:1;}}
-.duty-times{{font-family:monospace;font-size:14px;font-weight:600;}}
-.duty-meta{{font-size:10.5px;color:var(--dim-2);margin-top:2px;display:flex;gap:8px;}}
-.tag{{font-size:9px;font-weight:600;padding:2px 5px;border-radius:4px;white-space:nowrap;}}
-.tag.amber{{color:var(--amber);background:var(--amber-dim);}}
-.tag.red{{color:var(--red);background:var(--red-dim);}}
+.duty-row{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--line-soft);cursor:pointer;}
+.duty-row:last-child{border-bottom:none;}
+.duty-date{width:36px;text-align:center;}
+.duty-date .d{font-family:monospace;font-size:15px;font-weight:600;color:var(--paper);}
+.duty-date .w{font-size:9.5px;color:var(--dim-2);}
+.duty-bar{width:3px;align-self:stretch;border-radius:3px;background:var(--blue);}
+.duty-bar.off{background:var(--red);}
+.duty-main{flex:1;}
+.duty-times{font-family:monospace;font-size:14px;font-weight:600;}
+.duty-meta{font-size:10.5px;color:var(--dim-2);margin-top:2px;display:flex;gap:8px;}
+.tag{font-size:9px;font-weight:600;padding:2px 5px;border-radius:4px;white-space:nowrap;}
+.tag.amber{color:var(--amber);background:var(--amber-dim);}
+.tag.red{color:var(--red);background:var(--red-dim);}
 
 /* Tab bar */
-.tabbar{{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:rgba(14,20,28,0.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:30;}}
-.tab-item{{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;cursor:pointer;color:var(--dim-2);}}
-.tab-item svg{{width:18px;height:18px;stroke:var(--dim-2);fill:none;}}
-.tab-item span{{font-size:9.5px;font-weight:600;}}
-.tab-item.active{{color:var(--blue);}}
-.tab-item.active svg{{stroke:var(--blue);}}
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:rgba(14,20,28,0.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:30;}
+.tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;cursor:pointer;color:var(--dim-2);}
+.tab-item svg{width:18px;height:18px;stroke:var(--dim-2);fill:none;}
+.tab-item span{font-size:9.5px;font-weight:600;}
+.tab-item.active{color:var(--blue);}
+.tab-item.active svg{stroke:var(--blue);}
 
 /* Bottom Sheet */
-.sheet-overlay{{position:fixed;inset:0;background:rgba(3,5,8,0.65);display:none;align-items:flex-end;justify-content:center;z-index:50;backdrop-filter:blur(4px);}}
-.sheet-overlay.open{{display:flex;}}
-.sheet{{width:100%;max-width:480px;background:var(--ink-800);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:10px 18px calc(20px + env(safe-area-inset-bottom,0px));max-height:80vh;overflow-y:auto;}}
-.sheet-handle{{width:36px;height:4px;border-radius:3px;background:var(--line);margin:2px auto 14px;}}
-.btn{{display:block;width:100%;text-align:center;padding:12px;border-radius:9px;border:none;font-size:14px;font-weight:600;cursor:pointer;}}
-.btn-primary{{background:var(--blue);color:var(--ink-900);}}
+.sheet-overlay{position:fixed;inset:0;background:rgba(3,5,8,0.65);display:none;align-items:flex-end;justify-content:center;z-index:50;backdrop-filter:blur(4px);}
+.sheet-overlay.open{display:flex;}
+.sheet{width:100%;max-width:480px;background:var(--ink-800);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:10px 18px calc(20px + env(safe-area-inset-bottom,0px));max-height:80vh;overflow-y:auto;}
+.sheet-handle{width:36px;height:4px;border-radius:3px;background:var(--line);margin:2px auto 14px;}
+.btn{display:block;width:100%;text-align:center;padding:12px;border-radius:9px;border:none;font-size:14px;font-weight:600;cursor:pointer;}
+.btn-primary{background:var(--blue);color:var(--ink-900);}
 </style>
 </head>
 <body>
@@ -222,44 +221,44 @@ main{{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));over
 </div>
 
 <script>
-// 注入 Python 端算好的 JSON 資料
-const userData = {json.dumps(backend_user_info, ensure_ascii=False)};
-const scheduleData = {json.dumps(backend_schedule, ensure_ascii=False)};
-const exchangeData = {json.dumps(backend_exchange_candidates, ensure_ascii=False)};
+// 安全注入 JSON
+const userData = __USER_DATA__;
+const scheduleData = __SCHEDULE_DATA__;
+const exchangeData = __EXCHANGE_DATA__;
 
 // 渲染 Header & 個人資訊
 document.getElementById('headerUnit').textContent = userData.unit + ' · 已同步';
 document.getElementById('userName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + userData.title;
 
-// 渲染班表 (由 utils.py 算出的 processed_week1)
+// 渲染班表
 const schedContainer = document.getElementById('scheduleContainer');
 const days = scheduleData.week1 || [];
 
-schedContainer.innerHTML = days.map(day => {{
-  if(day.off) {{
+schedContainer.innerHTML = days.map(day => {
+  if(day.off) {
     return `
       <div class="duty-row">
-        <div class="duty-date"><div class="d mono">${{day.d}}</div><div class="w">${{day.wd}}</div></div>
+        <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
         <div class="duty-bar off"></div>
-        <div class="duty-main"><div style="color:var(--red);font-weight:600;font-size:13.5px;">${{day.off}}</div></div>
+        <div class="duty-main"><div style="color:var(--red);font-weight:600;font-size:13.5px;">${day.off}</div></div>
         <span class="tag red">休假日</span>
       </div>`;
   }
-  const tagsHtml = (day.tags||[]).map(t => `<span class="tag amber">${{t}}</span>`).join(' ');
-  const restHtml = day.rest ? `<span style="color:var(--${{day.restTag==='red'?'red':day.restTag==='amber'?'amber':'green'}})">班間 ${{day.rest}}</span>` : '';
+  const tagsHtml = (day.tags||[]).map(t => `<span class="tag amber">${t}</span>`).join(' ');
+  const restHtml = day.rest ? `<span style="color:var(--${day.restTag==='red'?'red':day.restTag==='amber'?'amber':'green'})">班間 ${day.rest}</span>` : '';
   
   return `
     <div class="duty-row">
-      <div class="duty-date"><div class="d mono">${{day.d}}</div><div class="w">${{day.wd}}</div></div>
+      <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
       <div class="duty-bar"></div>
       <div class="duty-main">
-        <div class="duty-times mono">${{day.start}} → ${{day.end}}</div>
-        <div class="duty-meta"><span>${{day.code}}</span><span>${{day.dur}}</span>${{restHtml}}</div>
+        <div class="duty-times mono">${day.start} → ${day.end}</div>
+        <div class="duty-meta"><span>${day.code}</span><span>${day.dur}</span>${restHtml}</div>
       </div>
-      <div>${{tagsHtml}}</div>
+      <div>${tagsHtml}</div>
     </div>`;
-}}).join('');
+}).join('');
 
 // 渲染換班名單
 const exContainer = document.getElementById('exchangeContainer');
@@ -267,28 +266,28 @@ const candidates = exchangeData['服勤員'] || [];
 exContainer.innerHTML = candidates.map(c => `
   <div class="duty-row">
     <div class="duty-main">
-      <div style="font-size:14px;font-weight:600;">${{c.name}} <span style="font-size:11px;color:var(--dim-2);" class="mono">(${{c.id}})</span></div>
-      <div class="duty-times mono" style="margin-top:2px;">${{c.start}} → ${{c.end}}</div>
-      <div style="font-size:10.5px;color:var(--dim-2);margin-top:2px;">${{c.streak}} · 前班間隔 ${{c.restBefore}}</div>
+      <div style="font-size:14px;font-weight:600;">${c.name} <span style="font-size:11px;color:var(--dim-2);" class="mono">(${c.id})</span></div>
+      <div class="duty-times mono" style="margin-top:2px;">${c.start} → ${c.end}</div>
+      <div style="font-size:10.5px;color:var(--dim-2);margin-top:2px;">${c.streak} · 前班間隔 ${c.restBefore}</div>
     </div>
   </div>
 `).join('');
 
 // 分頁控制
-function showTab(name){{
+function showTab(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.tab-item').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
   document.getElementById('mainContainer').scrollTop = 0;
-}}
+}
 
 // 彈窗控制
-function openSyncSheet(){{
+function openSyncSheet(){
   const sheet = document.getElementById('sheet');
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
     <div style="font-size:16px;font-weight:700;color:var(--paper);">大表同步資訊</div>
-    <div style="font-size:12px;color:var(--dim-2);margin:4px 0 16px;">當前基地：${{userData.unit_name}} (${{userData.unit}})</div>
+    <div style="font-size:12px;color:var(--dim-2);margin:4px 0 16px;">當前基地：${userData.unit_name} (${userData.unit})</div>
     <div style="background:var(--ink-700);padding:12px;border-radius:10px;border:1px solid var(--line);font-size:12.5px;color:var(--dim);">
       資料庫最後更新：2026-09-05 20:40<br>
       目前狀態：<span style="color:var(--green);font-weight:600;">已是最新大表版本</span>
@@ -296,12 +295,21 @@ function openSyncSheet(){{
     <button class="btn btn-primary" style="margin-top:16px;" onclick="closeSheet()">關閉視窗</button>
   `;
   document.getElementById('sheetOverlay').classList.add('open');
-}}
-function closeSheet(){{ document.getElementById('sheetOverlay').classList.remove('open'); }}
-function closeSheetOnBg(e){{ if(e.target.id==='sheetOverlay') closeSheet(); }}
+}
+function closeSheet(){ document.getElementById('sheetOverlay').classList.remove('open'); }
+function closeSheetOnBg(e){ if(e.target.id==='sheetOverlay') closeSheet(); }
 </script>
 </body>
 </html>
 """
+
+# 使用 .replace() 進行替換，避開 Python f-string 括號問題
+HTML_CODE = RAW_HTML_TEMPLATE.replace(
+    "__USER_DATA__", json.dumps(backend_user_info, ensure_ascii=False)
+).replace(
+    "__SCHEDULE_DATA__", json.dumps(backend_schedule, ensure_ascii=False)
+).replace(
+    "__EXCHANGE_DATA__", json.dumps(backend_exchange_candidates, ensure_ascii=False)
+)
 
 components.html(HTML_CODE, height=1000, scrolling=False)
