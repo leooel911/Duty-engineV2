@@ -1,7 +1,14 @@
 """
 CREW DUTY ENGINE V2 - Main Entrypoint
-無縫串接 V1 真實 Excel 算力與 V2 號誌樓滿版 UI
 """
+import os
+import sys
+
+# 🛠️ 1. 必須放在最頂端！確保 Python 優先把專案根目錄加入搜尋路徑
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 import json
 from datetime import datetime
 import streamlit as st
@@ -14,7 +21,7 @@ from modules.services import (
 )
 from modules.admin_views import render_admin_panel
 
-# 1. 頁面初始化
+# 2. 頁面初始化
 st.set_page_config(
     page_title="CREW DUTY ENGINE — Dispatch Terminal",
     page_icon="700st.png",
@@ -22,7 +29,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. Session State 初始化
+# 3. Session State 初始化
 if "current_unit" not in st.session_state:
     st.session_state.current_unit = "TTN"
 if "current_emp_id" not in st.session_state:
@@ -32,19 +39,23 @@ if "admin_logged_in" not in st.session_state:
 if "nav_mode" not in st.session_state:
     st.session_state.nav_mode = "user"
 
-# 3. 路由判斷：若切換至後台模式，渲染 V1 完整管理員後台 (包含三大表上傳、白名單、日誌)
+# 4. 路由判斷：後台管理員模式
 if st.session_state.nav_mode == "admin" and st.session_state.admin_logged_in:
     render_admin_panel()
     st.stop()
 
-# 4. 前台 Streamlit 側邊欄控制（放置切換組員與進入後台按鈕）
+# 5. 前台 Streamlit 側邊欄控制
 with st.sidebar:
     st.title("⚙️ 調度終端系統控制台")
     st.caption("CREW DUTY ENGINE V2 · Real-Data Hybrid")
     st.divider()
 
     # 切換基地
-    unit_sel = st.selectbox("選擇營運基地", ["TTN", "TTC", "TTS"], index=["TTN", "TTC", "TTS"].index(st.session_state.current_unit))
+    unit_sel = st.selectbox(
+        "選擇營運基地",
+        ["TTN", "TTC", "TTS"],
+        index=["TTN", "TTC", "TTS"].index(st.session_state.current_unit)
+    )
     if unit_sel != st.session_state.current_unit:
         st.session_state.current_unit = unit_sel
         st.rerun()
@@ -62,7 +73,7 @@ with st.sidebar:
         st.session_state.nav_mode = "admin"
         st.rerun()
 
-# 5. 全螢幕滿版 CSS
+# 6. 全螢幕滿版 CSS
 st.markdown(
     """
     <style>
@@ -84,7 +95,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 6. 調用 V1 算力抓取真實班表 JSON
+# 7. 調用算力抓取真實班表 JSON
 current_crew = get_crew_full_schedule_json(st.session_state.current_emp_id, st.session_state.current_unit)
 
 user_sched = current_crew["schedule"] if current_crew else []
@@ -94,10 +105,10 @@ formatted_schedule = {
     "week3": user_sched[14:21]
 }
 
-# 調用 V1 算力計算快搜名單
+# 調用算力計算快搜名單
 dynamic_exchange = search_exchange_candidates_v2(st.session_state.current_unit)
 
-# 7. 純前端 HTML 範本 (完全維持 V2 高質感)
+# 8. 純前端 HTML 範本
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-Hant">
