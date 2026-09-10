@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 from modules.utils import format_day_duty_to_v2
 from modules.services import get_current_duty_status, process_uploaded_excel
 
-# 視口配置
+# 1. 視口與頁面配置
 st.set_page_config(
     page_title="CREW DUTY ENGINE V2",
     page_icon="🚆",
@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Session State 全域狀態管理
+# 2. Session State 全域狀態初始化
 if "current_unit_code" not in st.session_state:
     st.session_state.current_unit_code = "TTN"
 if "current_unit_name" not in st.session_state:
@@ -30,32 +30,15 @@ if "user_info" not in st.session_state:
         "role": "ADMIN"
     }
 
-# ---------------------------------------------------------
-# 1. 側邊欄控制台 (Streamlit Sidebar 控制大表上傳)
-# ---------------------------------------------------------
-st.sidebar.title("⚙️ 乘務系統管理")
-st.sidebar.caption(f"目前使用者：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+# 3. 側邊欄抽屜：大表上傳與系統管理面板
+with st.sidebar:
+    st.title("⚙️ 乘務大表管理")
+    st.caption(f"管理者：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+    st.divider()
 
-app_mode = st.sidebar.radio(
-    "主選單切換",
-    ["📱 乘務 App 前台", "📤 上傳乘務大表 Excel"],
-    index=0
-)
+    st.subheader("📤 上傳乘務大表 Excel")
+    uploaded_file = st.file_uploader("選擇班表檔案 (.xls 或 .xlsx)", type=["xls", "xlsx"])
 
-st.sidebar.divider()
-st.sidebar.subheader("📌 系統狀態")
-st.sidebar.metric("大表識別基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
-st.sidebar.metric("資料庫最後同步", st.session_state.last_sync_time)
-
-# ---------------------------------------------------------
-# 模式 A：📤 上傳乘務大表 Excel
-# ---------------------------------------------------------
-if app_mode == "📤 上傳乘務大表 Excel":
-    st.title("⚙️ CREW DUTY ENGINE · 大表資料庫管理")
-    st.write("請選擇欲上傳之乘務大表 Excel 檔案（支援 `.xls` 或 `.xlsx`）：")
-    
-    uploaded_file = st.file_uploader("選擇大表檔案", type=["xls", "xlsx"])
-    
     if uploaded_file is not None:
         success, msg, df, (unit_code, unit_name) = process_uploaded_excel(uploaded_file)
         if success:
@@ -63,24 +46,36 @@ if app_mode == "📤 上傳乘務大表 Excel":
             st.session_state.current_unit_code = unit_code
             st.session_state.current_unit_name = unit_name
             st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            st.subheader("📊 班表資料庫即時預覽 (前 20 列)")
-            st.dataframe(df.head(20), use_container_width=True)
+            st.subheader("📊 班表資料庫預覽")
+            st.dataframe(df.head(10), use_container_width=True)
         else:
             st.error(msg)
-            
-    st.info("💡 完成檔案上傳後，請點擊左上角 `>` 開啟側邊欄，切換回「📱 乘務 App 前台」。")
-    st.stop()
 
-# ---------------------------------------------------------
-# 模式 B：📱 乘務 App 前台 (純滿版防跑位 CSS)
-# ---------------------------------------------------------
+    st.divider()
+    st.metric("當前大表基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
+    st.metric("資料庫同步時間", st.session_state.last_sync_time)
+
+# 4. 精確滿版防跑位 CSS + 釋放側邊欄開關按鈕
 st.markdown(
     """
     <style>
-    header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], footer {
-        display: none !important; height: 0px !important;
+    /* 隱藏原生 Streamlit 頁首與頁尾，僅保留側邊欄開關 (Sidebar Control Button) */
+    [data-testid="stHeader"] { background: transparent !important; height: 0px !important; }
+    [data-testid="stToolbar"], footer { display: none !important; }
+
+    /* 將側邊欄開關按鈕定位於左上角，呈現深色膠囊質感 */
+    [data-testid="stSidebarCollapsedControl"], button[aria-label="Open sidebar"] {
+        position: fixed !important;
+        top: 10px !important;
+        left: 10px !important;
+        z-index: 99999999 !important;
+        background-color: rgba(20, 28, 38, 0.85) !important;
+        border: 1px solid #232E3A !important;
+        border-radius: 8px !important;
+        color: #4C9AE0 !important;
+        backdrop-filter: blur(8px) !important;
     }
+
     html, body, .stApp, [data-testid="stAppViewContainer"] {
         padding: 0 !important; margin: 0 !important; background-color: #070B10 !important;
         overflow: hidden !important; height: 100dvh !important;
@@ -92,13 +87,14 @@ st.markdown(
     div[data-testid="stElementContainer"] { margin: 0 !important; padding: 0 !important; }
     iframe {
         border: none !important; width: 100vw !important; height: 100dvh !important;
-        position: fixed !important; top: 0 !important; left: 0 !important; z-index: 999999 !important;
+        position: fixed !important; top: 0 !important; left: 0 !important; z-index: 99999 !important;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+# 5. 前台 UI 資料組裝
 backend_user_info = {
     "emp_id": st.session_state.user_info["emp_id"],
     "name": st.session_state.user_info["name"],
@@ -126,7 +122,6 @@ for idx, item in enumerate(raw_schedule_data):
     processed_week[idx]["full_date"] = item["date_info"]["full_date"]
 
 duty_status = get_current_duty_status(processed_week)
-
 backend_schedule = {"week1": processed_week, "week2": [], "week3": []}
 
 backend_exchange_candidates = {
@@ -163,7 +158,7 @@ html,body{margin:0;padding:0;background:var(--ink-900);color:var(--paper);font-f
 .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
 
 .app{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;position:relative;background:var(--ink-900);}
-.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:rgba(7,11,16,0.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(35,46,58,0.5);}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px 48px;background:rgba(7,11,16,0.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(35,46,58,0.5);}
 .brand-mark{width:26px;height:26px;border-radius:6px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue);font-family:monospace;}
 .brand-name{font-size:13px;font-weight:600;color:var(--paper);}
 .unit-chip{display:flex;align-items:center;gap:6px;background:var(--ink-700);border:1px solid var(--line);padding:6px 10px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--paper);font-family:monospace;cursor:pointer;}
@@ -333,7 +328,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
         <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">大表同步時間</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profSyncTime">--</span></div>
       </div>
 
-      <div class="section-label">系統管理與設定</div>
+      <div class="section-label">系統資訊與設定</div>
       <div class="panel" style="padding:4px 12px;">
         <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">問題回報與建議</span><span style="color:var(--dim-2);">›</span></div>
         <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">系統使用須知</span><span style="color:var(--dim-2);">›</span></div>
