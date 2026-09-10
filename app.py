@@ -1,6 +1,6 @@
 """
-CREW DUTY ENGINE V2 - Main Streamlit Application
-完全動態資料驅動（零寫死假資料）
+CREW DUTY ENGINE V2 - Dispatch Terminal
+整合直覺式前台上傳入口與無縫後台控制
 """
 import json
 from datetime import datetime
@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 
 from modules.services import parse_master_excel, build_exchange_candidates_dynamic
 
-# 1. 頁面配置
+# 1. 頁面初始化
 st.set_page_config(
     page_title="CREW DUTY ENGINE — Dispatch Terminal",
     page_icon="🚆",
@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. 全域 Session State 初始化（初始狀況下完全沒有班表資料）
+# 2. 全域 Session State
 if "all_rosters" not in st.session_state:
     st.session_state.all_rosters = {}
 if "current_emp_id" not in st.session_state:
@@ -31,7 +31,7 @@ if "last_sync_time" not in st.session_state:
 if "user_role" not in st.session_state:
     st.session_state.user_role = "ADMIN"
 
-# 3. 側邊欄：真實大表檔案上傳與人員選擇器
+# 3. 側邊欄：管理者與大表上傳控制台
 with st.sidebar:
     st.title("⚙️ 乘務調度控制台")
     st.caption("CREW DUTY ENGINE V2 · Real-Data Engine")
@@ -43,7 +43,7 @@ with st.sidebar:
 
     # 上傳大表
     st.subheader("📤 乘務大表 Excel 上傳")
-    uploaded_file = st.file_uploader("上傳月度大表 (.xls, .xlsx)", type=["xls", "xlsx"])
+    uploaded_file = st.file_uploader("選擇月度大表 Excel (.xls, .xlsx)", type=["xls", "xlsx"])
     
     if uploaded_file is not None:
         success, rosters, df, (u_code, u_name) = parse_master_excel(uploaded_file)
@@ -52,28 +52,27 @@ with st.sidebar:
             st.session_state.current_unit_code = u_code
             st.session_state.current_unit_name = u_name
             st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-            # 預設選取第一位組員
             st.session_state.current_emp_id = list(rosters.keys())[0]
             st.success(f"成功解析【{u_name} ({u_code})】大表！共 {len(rosters)} 位組員。")
             st.dataframe(df.head(10), use_container_width=True)
         else:
             st.error("大表解析失敗，請確認檔案格式是否正確。")
 
-    # 動態選單：從大表真實清單中選取檢視對象
+    # 動態組員切換
     st.divider()
-    st.subheader("👤 選擇檢視組員")
+    st.subheader("👤 模擬登入 / 切換組員")
     if st.session_state.all_rosters:
         emp_options = {f"{info['name']} ({emp}) - {info['role_title']}": emp for emp, info in st.session_state.all_rosters.items()}
-        selected_label = st.selectbox("切換組員", list(emp_options.keys()))
+        selected_label = st.selectbox("切換檢視組員", list(emp_options.keys()))
         st.session_state.current_emp_id = emp_options[selected_label]
     else:
-        st.warning("⚠️ 請先上傳大表 Excel 以載入組員資料。")
+        st.warning("⚠️ 請上傳 Excel 大表以載入基地組員名單。")
 
     st.divider()
     st.metric("大表基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
     st.metric("最後同步", st.session_state.last_sync_time)
 
-# 4. Streamlit 滿版邊界防護 CSS
+# 4. 滿版 CSS + 側邊欄按鈕強化
 st.markdown(
     """
     <style>
@@ -110,22 +109,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 5. 取得當前真實選取的組員資料（未上傳前為 None）
+# 5. 抓取當前真實選取的組員資料
 current_crew = None
 if st.session_state.all_rosters and st.session_state.current_emp_id:
     current_crew = st.session_state.all_rosters.get(st.session_state.current_emp_id)
 
 user_sched = current_crew["schedule"] if current_crew else []
-week1 = user_sched[:7]
-week2 = user_sched[7:14]
-week3 = user_sched[14:21]
+formatted_schedule = {
+    "week1": user_sched[:7],
+    "week2": user_sched[7:14],
+    "week3": user_sched[14:21]
+}
 
-formatted_schedule = {"week1": week1, "week2": week2, "week3": week3}
-
-# 計算真實換班快搜候選名單
 dynamic_exchange = build_exchange_candidates_dynamic(st.session_state.all_rosters)
 
-# 6. 純前端 HTML 模板（100% 套用原汁原味 crew-duty-engine-redesign.html）
+# 6. 純前端 HTML 模板 (含點擊自動開啟管理側邊欄 JS)
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-Hant">
@@ -182,7 +180,7 @@ body{
   background:var(--ink-700); border:1px solid var(--line);
   padding:6px 10px 6px 12px; border-radius:8px;
   font-size:12.5px;font-weight:600; color:var(--paper);
-  font-family:'IBM Plex Mono',monospace;
+  font-family:'IBM Plex Mono',monospace; cursor:pointer;
 }
 .unit-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
 
@@ -237,11 +235,17 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
 .tag.red{color:var(--red);background:var(--red-dim);}
 
 .empty-box {
-  text-align: center; padding: 40px 16px; background: var(--ink-800);
-  border: 1px solid var(--line); border-radius: 12px; margin-top: 20px;
+  text-align: center; padding: 36px 16px; background: var(--ink-800);
+  border: 1px solid var(--line); border-radius: 14px; margin-top: 16px;
 }
-.empty-box .title { font-size: 15px; font-weight: 600; color: var(--paper); margin-bottom: 6px; }
-.empty-box .sub { font-size: 12.5px; color: var(--dim-2); line-height: 1.5; }
+.empty-box .title { font-size: 16px; font-weight: 700; color: var(--paper); margin-bottom: 6px; }
+.empty-box .sub { font-size: 12.5px; color: var(--dim-2); line-height: 1.6; margin-bottom: 20px; }
+
+.btn{
+  display:block; width:100%; text-align:center; padding:13px; border-radius:10px; border:none;
+  font-size:14.5px; font-weight:600; cursor:pointer; font-family:'IBM Plex Sans TC',sans-serif;
+}
+.btn-primary{background:var(--blue); color:var(--ink-900);}
 
 .role-tabs{display:flex; gap:8px; margin-bottom:14px;}
 .role-tab{
@@ -263,7 +267,7 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
   font-family:'IBM Plex Mono',monospace; font-weight:700; color:var(--blue); font-size:15px;
 }
 
-.list-row{display:flex; justify-content:space-between; align-items:center; padding:13px 2px; border-bottom:1px solid var(--line-soft);}
+.list-row{display:flex; justify-content:space-between; align-items:center; padding:13px 2px; border-bottom:1px solid var(--line-soft); cursor:pointer;}
 .list-row-label{font-size:13.5px; color:var(--paper);}
 .list-row-value{font-size:12.5px; color:var(--dim-2); font-family:'IBM Plex Mono',monospace;}
 
@@ -294,7 +298,7 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
         <div class="brand-sub">redesign concept · C.L.F</div>
       </div>
     </div>
-    <div class="unit-chip">
+    <div class="unit-chip" onclick="openAdminPanel()">
       <span class="dot"></span>
       <span id="unitText">--</span>
     </div>
@@ -355,8 +359,18 @@ const scheduleData = __SCHEDULE_JSON__;
 const exchangeData = __EXCHANGE_JSON__;
 const syncTimeStr = "__SYNC_TIME__";
 
-// 渲染大表基地
-document.getElementById('unitText').textContent = crewData ? crewData.unit : '--';
+// JS 觸發開關：自動打開 Streamlit 側邊欄抽屜
+function openAdminPanel(){
+  try {
+    const btn = window.parent.document.querySelector('button[aria-label="Open sidebar"], [data-testid="stSidebarCollapsedControl"]');
+    if(btn) btn.click();
+  } catch(e) {
+    console.log(e);
+  }
+}
+
+// 頂部基地顯示
+document.getElementById('unitText').textContent = crewData ? crewData.unit : '點此上傳';
 
 // 渲染首頁 (HOME)
 const homeBox = document.getElementById('homeContent');
@@ -364,18 +378,24 @@ if(!crewData){
   homeBox.innerHTML = `
     <div class="empty-box">
       <div class="title">尚未載入乘務大表</div>
-      <div class="sub">請點擊左上角按鈕 <b>「›」</b> 開啟控制台<br>上傳月度乘務 Excel 大表以啟用系統。</div>
+      <div class="sub">歡迎使用 CREW DUTY ENGINE。<br>請點擊下方按鈕上傳月度 Excel 大表，或切換登入組員。</div>
+      <button class="btn btn-primary" onclick="openAdminPanel()">📤 點此開啟控制台／上傳大表</button>
     </div>`;
 } else {
   homeBox.innerHTML = `
     <div class="hero">
-      <div style="font-size:13px;font-weight:600;color:var(--blue);">登入組員：${crewData.name} (${crewData.emp_id})</div>
-      <div style="font-size:11.5px;color:var(--dim-2);margin-top:2px;">基地：${crewData.unit_name} (${crewData.unit}) · 職掌：${crewData.role_title}</div>
+      <div style="font-size:14px;font-weight:700;color:var(--paper);">登入組員：${crewData.name} (${crewData.emp_id})</div>
+      <div style="font-size:11.5px;color:var(--dim-2);margin-top:3px;">基地：${crewData.unit_name} (${crewData.unit}) · 職掌：${crewData.role_title}</div>
     </div>
-    <div class="section-label">系統說明</div>
-    <div class="panel" style="padding:12px;">
-      <div style="font-size:12.5px;color:var(--paper);line-height:1.6;">
-        大表已成功動態解析！您可以切換下方選單至<b>「我的班表」</b>檢視個人全月勤務，或至<b>「換班快搜」</b>進行全基地動態合規換班檢核。
+    <div class="section-label">快速功能</div>
+    <div class="panel">
+      <div class="duty-row" onclick="showTab('schedule')" style="cursor:pointer;padding:12px 0;">
+        <div style="flex:1;"><div style="font-size:14px;font-weight:600;">我的月班表</div><div style="font-size:11.5px;color:var(--dim-2);">逐日清單・含班間合規標示</div></div>
+        <span style="color:var(--dim-2);">›</span>
+      </div>
+      <div class="duty-row" onclick="showTab('exchange')" style="cursor:pointer;padding:12px 0;">
+        <div style="flex:1;"><div style="font-size:14px;font-weight:600;">換班快搜</div><div style="font-size:11.5px;color:var(--dim-2);">依 Sign-in 時間窗篩選可換組員</div></div>
+        <span style="color:var(--dim-2);">›</span>
       </div>
     </div>`;
 }
@@ -386,7 +406,8 @@ if(!crewData || !scheduleData.week1 || scheduleData.week1.length === 0){
   schedBox.innerHTML = `
     <div class="empty-box">
       <div class="title">無班表資料</div>
-      <div class="sub">請先上傳 Excel 大表。</div>
+      <div class="sub">請先開啟控制台上傳大表 Excel。</div>
+      <button class="btn btn-primary" onclick="openAdminPanel()">📤 上傳大表 Excel</button>
     </div>`;
 } else {
   document.getElementById('schedTitle').textContent = `我的月班表 · ${crewData.emp_id} ${crewData.name}`;
@@ -427,7 +448,7 @@ if(!crewData || !scheduleData.week1 || scheduleData.week1.length === 0){
     <div class="panel">${renderWeekHtml(scheduleData.week3)}</div>`;
 }
 
-// 渲染換班搜尋 (EXCHANGE)
+// 換班搜尋 (EXCHANGE)
 function filterRole(role, btn){
   document.querySelectorAll('.role-tab').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
@@ -457,13 +478,14 @@ function renderExchange(role){
 }
 renderExchange('服勤員');
 
-// 渲染個人頁面 (PROFILE)
+// 個人頁面 (PROFILE) - 包含管理者選單入口
 const profBox = document.getElementById('profileContent');
 if(!crewData){
   profBox.innerHTML = `
     <div class="empty-box">
-      <div class="title">未登入組員</div>
-      <div class="sub">請先上傳大表資料。</div>
+      <div class="title">未載入組員</div>
+      <div class="sub">請開啟控制台進行上傳。</div>
+      <button class="btn btn-primary" onclick="openAdminPanel()">⚙️ 開啟管理控制台</button>
     </div>`;
 } else {
   profBox.innerHTML = `
@@ -474,9 +496,14 @@ if(!crewData){
         <div style="font-size:11.5px;color:var(--dim-2);font-family:monospace;">${crewData.emp_id} · ${crewData.unit} · ${crewData.role_title}</div>
       </div>
     </div>
+    <div class="section-label">帳號與資料</div>
     <div class="panel">
       <div class="list-row"><span class="list-row-label">所屬單位</span><span class="list-row-value">${crewData.unit_name} (${crewData.unit})</span></div>
       <div class="list-row"><span class="list-row-label">大表同步時間</span><span class="list-row-value">${syncTimeStr}</span></div>
+    </div>
+    <div class="section-label">系統管理</div>
+    <div class="panel">
+      <div class="list-row" onclick="openAdminPanel()"><span class="list-row-label">⚙️ 管理者控制台／上傳大表</span><span style="color:var(--blue);">›</span></div>
     </div>`;
 }
 
@@ -490,7 +517,6 @@ function showTab(name){
 </html>
 """
 
-# 資料注入（當未上傳大表時，crewData 即為 None/null）
 HTML_CODE = RAW_HTML_TEMPLATE.replace(
     "__CREW_JSON__", json.dumps(current_crew, ensure_ascii=False) if current_crew else "null"
 ).replace(
