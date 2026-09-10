@@ -1,15 +1,20 @@
-"""
-CREW DUTY ENGINE V2 - Core Bridge Services
-繼承 V1 真實大表解析算力（TD/TM/TA 三表連動、parse_cell 班別拆解、合規計算）
-"""
-import json
 import os
+import sys
+
+# 🛠️ 自動加入專案根目錄，解決 Streamlit Cloud 找不到 config.py 的問題
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+import json
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
+
+# 載入根目錄設定
 from config import DATA_DIR, SYSTEM_CONFIG_FILE, UNITS, WHITELIST_FILE
 from modules.utils import (
     calculate_consecutive_work_days,
@@ -22,7 +27,6 @@ from modules.utils import (
     safe_read_excel,
     translate_train_code,
 )
-
 # ---------------------------------------------------------
 # 1. 載入全站系統設定與白名單
 # ---------------------------------------------------------
