@@ -1,12 +1,14 @@
 import json
+from datetime import datetime, timedelta
 import streamlit as st
 import streamlit.components.v1 as components
 
-# 1. 載入核心模組
+# 1. 載入核心模組與算力服務
 from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
+from modules.services import get_current_duty_status
 
-# 2. Streamlit 頁面寬度與邊框重置
+# 2. Streamlit 視口重置
 st.set_page_config(
     page_title="CREW DUTY ENGINE V2",
     page_icon="🚆",
@@ -39,21 +41,32 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# 3. Python 後端運算測試（呼叫 modules/utils.py 進行格式化）
+# 3. 動態時間計算 (基於目前真實時間產生未來對應班別)
 # ---------------------------------------------------------
+now = datetime.now()
+t_day1 = now + timedelta(days=1)
+t_day2 = now + timedelta(days=2)
+t_day3 = now + timedelta(days=3)
+
 raw_schedule_data = [
-    {"date_info": {"day": 9, "weekday": "日", "full_date": "2026-09-09"}, "duty_code": "NH1005", "start_time": "05:51", "end_time": "13:51", "duration_str": "8h00m", "prev_end_time": "18:00"},
-    {"date_info": {"day": 10, "weekday": "一", "full_date": "2026-09-10"}, "duty_code": "NF0018", "start_time": "07:24", "end_time": "15:24", "duration_str": "8h00m", "prev_end_time": "13:51"},
-    {"date_info": {"day": 11, "weekday": "二", "full_date": "2026-09-11"}, "duty_code": "NG0001", "start_time": "05:26", "end_time": "15:06", "duration_str": "9h40m", "prev_end_time": "15:24"},
-    {"date_info": {"day": 12, "weekday": "三", "full_date": "2026-09-12"}, "duty_code": "NH0543", "start_time": "14:34", "end_time": "24:16", "duration_str": "9h42m", "prev_end_time": "15:06"},
-    {"date_info": {"day": 13, "weekday": "四", "full_date": "2026-09-13"}, "duty_code": "DO1"},
-    {"date_info": {"day": 14, "weekday": "五", "full_date": "2026-09-14"}, "duty_code": "DO3X"},
+    {"date_info": {"day": now.day, "weekday": "今", "full_date": now.strftime("%Y-%m-%d")}, "duty_code": "DO1"},
+    {"date_info": {"day": t_day1.day, "weekday": "明", "full_date": t_day1.strftime("%Y-%m-%d")}, "duty_code": "NG0001", "start_time": "07:24", "end_time": "15:24", "duration_str": "8h00m", "prev_end_time": "20:00"},
+    {"date_info": {"day": t_day2.day, "weekday": "後", "full_date": t_day2.strftime("%Y-%m-%d")}, "duty_code": "NH0543", "start_time": "14:34", "end_time": "24:16", "duration_str": "9h42m", "prev_end_time": "15:24"},
+    {"date_info": {"day": t_day3.day, "weekday": "大後", "full_date": t_day3.strftime("%Y-%m-%d")}, "duty_code": "DO3X"},
 ]
 
-processed_week1 = [format_day_duty_to_v2(**item) for item in raw_schedule_data]
+# 經由 utils 格式化
+processed_week = [format_day_duty_to_v2(**item) for item in raw_schedule_data]
+
+# 補齊 full_date 供時間比對服務使用
+for idx, item in enumerate(raw_schedule_data):
+    processed_week[idx]["full_date"] = item["date_info"]["full_date"]
+
+# 呼叫 services 比對出當前出勤狀態與精準倒數毫秒戳
+duty_status = get_current_duty_status(processed_week)
 
 backend_schedule = {
-    "week1": processed_week1,
+    "week1": processed_week,
     "week2": [],
     "week3": []
 }
@@ -78,7 +91,7 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (帶回 Hero 卡片與計時器)
+# 4. 全介面 HTML / CSS / JS 模板 (注入真實 Timestamp 驅動計時器)
 # ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -215,24 +228,24 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
   <main id="mainContainer">
     <!-- 1. 今日首頁 -->
     <section class="screen active" id="screen-home">
-      <!-- 英雄卡片與倒數計時器 -->
+      <!-- 英雄卡片與即時動態倒數計時器 -->
       <div class="hero">
         <div class="hero-top">
-          <span class="hero-status" id="heroStatus"><span class="dot"></span>今日休假・DO1</span>
-          <span class="hero-cycle mono">週期 09/06–10/03</span>
+          <span class="hero-status" id="heroStatus"><span class="dot"></span><span id="statusTxt">--</span></span>
+          <span class="hero-cycle mono" id="heroCycle">--</span>
         </div>
         <div class="hero-label">距下次出勤簽到</div>
         <div class="countdown">
-          <span class="num" id="cd-h">--</span><span class="unit">時</span>
-          <span class="num" id="cd-m">--</span><span class="unit">分</span>
-          <span class="num" id="cd-s">--</span><span class="unit">秒</span>
+          <span class="num" id="cd-h">00</span><span class="unit">時</span>
+          <span class="num" id="cd-m">00</span><span class="unit">分</span>
+          <span class="num" id="cd-s">00</span><span class="unit">秒</span>
         </div>
         <div class="hero-next">
           <div class="hero-next-left">
-            <div class="hero-next-date">9/17（四）NG1547</div>
-            <div class="hero-next-times">16:24 <span style="color:var(--dim-2);font-weight:400;font-size:13px;">→</span> 24:30</div>
+            <div class="hero-next-date" id="nextDate">--</div>
+            <div class="hero-next-times" id="nextTimes">--:-- → --:--</div>
           </div>
-          <div class="hero-next-code">8h06m</div>
+          <div class="hero-next-code" id="nextCode">--</div>
         </div>
       </div>
 
@@ -290,26 +303,40 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 </div>
 
 <script>
-// 安全注入 JSON
+// 安全注入 JSON 資料
 const userData = __USER_DATA__;
 const scheduleData = __SCHEDULE_DATA__;
 const exchangeData = __EXCHANGE_DATA__;
+const statusData = __STATUS_DATA__;
 
 // 渲染 Header & 個人資訊
 document.getElementById('headerUnit').textContent = userData.unit + ' · 已同步';
 document.getElementById('userName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + userData.title;
 
-// 倒數計時器邏輯
+// 渲染 Hero 英雄卡片內容
+document.getElementById('statusTxt').textContent = statusData.status_text;
+document.getElementById('heroCycle').textContent = statusData.current_cycle;
+document.getElementById('nextDate').textContent = statusData.next_duty_title;
+document.getElementById('nextTimes').textContent = statusData.next_duty_times;
+document.getElementById('nextCode').textContent = statusData.next_duty_code;
+
+// 精準時間差倒數計時引擎
 function pad(n){ return String(n).padStart(2,'0'); }
 function updateCountdown(){
-  const now = new Date();
-  const target = new Date();
-  target.setHours(now.getHours()+3, now.getMinutes()+22, 15, 0);
-  let diff = Math.max(0, target - now);
-  const h = Math.floor(diff/3600000);
-  const m = Math.floor((diff%3600000)/60000);
-  const s = Math.floor((diff%60000)/1000);
+  if(!statusData.target_timestamp_ms) {
+    document.getElementById('cd-h').textContent = "00";
+    document.getElementById('cd-m').textContent = "00";
+    document.getElementById('cd-s').textContent = "00";
+    return;
+  }
+  const now = new Date().getTime();
+  let diff = Math.max(0, statusData.target_timestamp_ms - now);
+
+  const h = Math.floor(diff / (1000 * 60 * 60));
+  const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const s = Math.floor((diff % (1000 * 60)) / 1000);
+
   document.getElementById('cd-h').textContent = pad(h);
   document.getElementById('cd-m').textContent = pad(m);
   document.getElementById('cd-s').textContent = pad(s);
@@ -389,13 +416,15 @@ function closeSheetOnBg(e){ if(e.target.id==='sheetOverlay') closeSheet(); }
 </html>
 """
 
-# 使用 .replace() 進行替換，避開 Python f-string 括號問題
+# 使用 .replace() 安全注入 JSON
 HTML_CODE = RAW_HTML_TEMPLATE.replace(
     "__USER_DATA__", json.dumps(backend_user_info, ensure_ascii=False)
 ).replace(
     "__SCHEDULE_DATA__", json.dumps(backend_schedule, ensure_ascii=False)
 ).replace(
     "__EXCHANGE_DATA__", json.dumps(backend_exchange_candidates, ensure_ascii=False)
+).replace(
+    "__STATUS_DATA__", json.dumps(duty_status, ensure_ascii=False)
 )
 
 components.html(HTML_CODE, height=1000, scrolling=False)
