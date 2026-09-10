@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -87,7 +88,7 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (回復 4 欄式 TabBar)
+# 4. 全介面 HTML / CSS / JS 模板 (修復 4 欄導覽列)
 # ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -253,17 +254,17 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       <div class="section-label">快速功能</div>
       <div class="panel" style="padding:4px 12px;">
         <div class="duty-row" onclick="showTab('schedule')">
-          <div style="font-size:14px;font-weight:600;flex:1;">檢視個人當週班表 (Modules 算力驅動)</div>
+          <div style="font-size:14px;font-weight:600;flex:1;">我的月班表 (Modules 算力驅動)</div>
           <span style="color:var(--dim-2);">›</span>
         </div>
         <div class="duty-row" onclick="showTab('exchange')">
-          <div style="font-size:14px;font-weight:600;flex:1;">換班對象快搜</div>
+          <div style="font-size:14px;font-weight:600;flex:1;">換班快搜</div>
           <span style="color:var(--dim-2);">›</span>
         </div>
       </div>
     </section>
 
-    <!-- 2. 月班表 -->
+    <!-- 2. 我的班表 -->
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
       <div class="panel" id="scheduleContainer"></div>
@@ -309,11 +310,11 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     </div>
     <div class="tab-item" data-tab="schedule" onclick="showTab('schedule')">
       <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
-      <span>班表</span>
+      <span>我的班表</span>
     </div>
     <div class="tab-item" data-tab="exchange" onclick="showTab('exchange')">
       <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11M18 7l-3-3M18 7l-3 3M17 17H6M6 17l3 3M6 17l3-3"/></svg>
-      <span>換班</span>
+      <span>換班快搜</span>
     </div>
     <div class="tab-item" data-tab="profile" onclick="showTab('profile')">
       <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M4.5 20c1.5-4 4.5-6 7.5-6s6 2 7.5 6"/></svg>
