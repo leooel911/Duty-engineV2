@@ -88,7 +88,7 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (修復 4 欄導覽列)
+# 4. 全介面 HTML / CSS / JS 模板 (加入班表圖例列)
 # ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -189,6 +189,28 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 .tag.amber{color:var(--amber);background:var(--amber-dim);}
 .tag.red{color:var(--red);background:var(--red-dim);}
 
+/* 班表狀態圖例列 (Legend Bar) */
+.legend-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 2px 0;
+}
+.legend-chip {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+}
+.legend-chip.grey { color: #8A98A8; background: rgba(122,135,148,0.18); border: 1px solid rgba(122,135,148,0.25); }
+.legend-chip.red { color: var(--red); background: var(--red-dim); border: 1px solid rgba(225,97,92,0.25); }
+.legend-chip.green { color: var(--green); background: var(--green-dim); border: 1px solid rgba(79,184,138,0.25); }
+.legend-chip.amber { color: var(--amber); background: var(--amber-dim); border: 1px solid rgba(227,161,61,0.25); }
+.legend-chip.purple { color: var(--purple); background: var(--purple-dim); border: 1px solid rgba(155,140,224,0.25); }
+
 /* 4 欄式 Tab bar */
 .tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:rgba(14,20,28,0.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:30;}
 .tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;cursor:pointer;color:var(--dim-2);}
@@ -254,7 +276,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       <div class="section-label">快速功能</div>
       <div class="panel" style="padding:4px 12px;">
         <div class="duty-row" onclick="showTab('schedule')">
-          <div style="font-size:14px;font-weight:600;flex:1;">我的月班表 (Modules 算力驅動)</div>
+          <div style="font-size:14px;font-weight:600;flex:1;">我的班表 (Modules 算力驅動)</div>
           <span style="color:var(--dim-2);">›</span>
         </div>
         <div class="duty-row" onclick="showTab('exchange')">
@@ -267,6 +289,18 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     <!-- 2. 我的班表 -->
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
+      
+      <!-- 原型對齊：班表狀態圖例標籤列 -->
+      <div class="legend-bar">
+        <span class="legend-chip grey">偏駐</span>
+        <span class="legend-chip red">休假日</span>
+        <span class="legend-chip green">特休</span>
+        <span class="legend-chip amber">工時 &gt; 8.5h</span>
+        <span class="legend-chip amber">國定假日</span>
+        <span class="legend-chip purple">破輪</span>
+        <span class="legend-chip grey">非正線勤務</span>
+      </div>
+
       <div class="panel" id="scheduleContainer"></div>
     </section>
 
