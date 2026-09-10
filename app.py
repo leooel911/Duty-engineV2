@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timedelta
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -41,7 +40,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# 3. 動態時間計算 (基於目前真實時間產生未來對應班別)
+# 3. 動態時間計算 (基於目前真實時間產生對應班別)
 # ---------------------------------------------------------
 now = datetime.now()
 t_day1 = now + timedelta(days=1)
@@ -55,14 +54,11 @@ raw_schedule_data = [
     {"date_info": {"day": t_day3.day, "weekday": "大後", "full_date": t_day3.strftime("%Y-%m-%d")}, "duty_code": "DO3X"},
 ]
 
-# 經由 utils 格式化
 processed_week = [format_day_duty_to_v2(**item) for item in raw_schedule_data]
 
-# 補齊 full_date 供時間比對服務使用
 for idx, item in enumerate(raw_schedule_data):
     processed_week[idx]["full_date"] = item["date_info"]["full_date"]
 
-# 呼叫 services 比對出當前出勤狀態與精準倒數毫秒戳
 duty_status = get_current_duty_status(processed_week)
 
 backend_schedule = {
@@ -91,7 +87,7 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (注入真實 Timestamp 驅動計時器)
+# 4. 全介面 HTML / CSS / JS 模板 (回復 4 欄式 TabBar)
 # ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -192,7 +188,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 .tag.amber{color:var(--amber);background:var(--amber-dim);}
 .tag.red{color:var(--red);background:var(--red-dim);}
 
-/* Tab bar */
+/* 4 欄式 Tab bar */
 .tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:rgba(14,20,28,0.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:30;}
 .tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;cursor:pointer;color:var(--dim-2);}
 .tab-item svg{width:18px;height:18px;stroke:var(--dim-2);fill:none;}
@@ -228,7 +224,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
   <main id="mainContainer">
     <!-- 1. 今日首頁 -->
     <section class="screen active" id="screen-home">
-      <!-- 英雄卡片與即時動態倒數計時器 -->
       <div class="hero">
         <div class="hero-top">
           <span class="hero-status" id="heroStatus"><span class="dot"></span><span id="statusTxt">--</span></span>
@@ -279,20 +274,50 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       <div class="section-label" style="margin-top:2px;">換班快搜名單</div>
       <div class="panel" id="exchangeContainer"></div>
     </section>
+
+    <!-- 4. 我的 (Profile) -->
+    <section class="screen" id="screen-profile">
+      <div style="display:flex;align-items:center;gap:12px;padding:6px 2px 16px;">
+        <div style="width:44px;height:44px;border-radius:10px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:monospace;font-weight:700;color:var(--blue);font-size:15px;" id="profileAvatar">江</div>
+        <div>
+          <div style="font-size:15px;font-weight:600;" id="profileName">--</div>
+          <div style="font-size:11px;color:var(--dim-2);margin-top:2px;font-family:monospace;" id="profileMeta">--</div>
+        </div>
+      </div>
+
+      <div class="section-label">帳號與權限</div>
+      <div class="panel" style="padding:4px 12px;">
+        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">所屬單位</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profUnit">TTN</span></div>
+        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">權限層級</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;">CREW</span></div>
+        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">大表同步時間</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;">2026-09-05 20:40</span></div>
+      </div>
+
+      <div class="section-label">系統資訊與設定</div>
+      <div class="panel" style="padding:4px 12px;">
+        <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">問題回報與建議</span><span style="color:var(--dim-2);">›</span></div>
+        <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">系統使用須知</span><span style="color:var(--dim-2);">›</span></div>
+        <div class="duty-row"><span style="font-size:13.5px;color:var(--red);flex:1;">登出系統</span><span style="color:var(--dim-2);">›</span></div>
+      </div>
+    </section>
   </main>
 
+  <!-- 4 欄式 Tab Bar -->
   <nav class="tabbar">
     <div class="tab-item active" data-tab="home" onclick="showTab('home')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M4 11l8-6 8 6v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg>
-      <span>首頁</span>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-6 8 6v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/></svg>
+      <span>今日</span>
     </div>
     <div class="tab-item" data-tab="schedule" onclick="showTab('schedule')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
       <span>班表</span>
     </div>
     <div class="tab-item" data-tab="exchange" onclick="showTab('exchange')">
-      <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M7 7h11M18 7l-3-3M18 7l-3 3M17 17H6M6 17l3 3M6 17l3-3"/></svg>
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h11M18 7l-3-3M18 7l-3 3M17 17H6M6 17l3 3M6 17l3-3"/></svg>
       <span>換班</span>
+    </div>
+    <div class="tab-item" data-tab="profile" onclick="showTab('profile')">
+      <svg viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M4.5 20c1.5-4 4.5-6 7.5-6s6 2 7.5 6"/></svg>
+      <span>我的</span>
     </div>
   </nav>
 
@@ -313,6 +338,12 @@ const statusData = __STATUS_DATA__;
 document.getElementById('headerUnit').textContent = userData.unit + ' · 已同步';
 document.getElementById('userName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + userData.title;
+
+// 渲染 Profile 頁面資訊
+document.getElementById('profileAvatar').textContent = userData.name ? userData.name.charAt(0) : 'CD';
+document.getElementById('profileName').textContent = userData.name + ' (' + userData.emp_id + ')';
+document.getElementById('profileMeta').textContent = userData.unit + ' · ' + userData.title;
+document.getElementById('profUnit').textContent = userData.unit_name + ' (' + userData.unit + ')';
 
 // 渲染 Hero 英雄卡片內容
 document.getElementById('statusTxt').textContent = statusData.status_text;
@@ -386,7 +417,7 @@ exContainer.innerHTML = candidates.map(c => `
   </div>
 `).join('');
 
-// 分頁控制
+// 分頁切換邏輯
 function showTab(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
