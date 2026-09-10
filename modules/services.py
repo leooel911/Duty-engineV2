@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta
-import re
 import pandas as pd
 from modules.utils import format_day_duty_to_v2
 
@@ -41,32 +40,22 @@ def get_current_duty_status(schedule_list: list):
     return status_info
 
 
-def parse_excel_roster(file_obj, emp_id: str):
+def process_uploaded_excel(uploaded_file):
     """
-    解析乘務 Excel 班表大表，抓取指定員編 (emp_id) 的整月班表
+    處理並驗證上傳的乘務大表 Excel
+    傳回：(是否成功, 解析報告/訊息, Dataframe數據集)
     """
-    if file_obj is None:
-        return None
+    if uploaded_file is None:
+        return False, "尚未上傳任何檔案", None
 
     try:
         # 讀取 Excel 檔案
-        df = pd.read_excel(file_obj, header=None)
+        df = pd.read_excel(uploaded_file)
+        row_count, col_count = df.shape
         
-        # 搜尋包含員編的目標列 (Row)
-        target_row_idx = None
-        for idx, row in df.iterrows():
-            row_str = row.astype(str).str.cat(sep=' ')
-            if emp_id in row_str:
-                target_row_idx = idx
-                break
-
-        if target_row_idx is None:
-            return None
-
-        # 擷取該員編列的班號數據（擴充備用）
-        user_row = df.iloc[target_row_idx].dropna().tolist()
-        return user_row
-
+        sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        summary_msg = f"成功解析班表！共讀取 {row_count} 列資料，最後同步時間：{sync_time}"
+        
+        return True, summary_msg, df
     except Exception as e:
-        print(f"Excel 解析異常: {e}")
-        return None
+        return False, f"Excel 檔案格式解析失敗：{str(e)}", None
