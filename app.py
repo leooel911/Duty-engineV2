@@ -6,9 +6,9 @@ import streamlit.components.v1 as components
 # 1. 載入核心模組與算力服務
 from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
-from modules.services import get_current_duty_status
+from modules.services import get_current_duty_status, process_uploaded_excel
 
-# 2. Streamlit 視口與頁面設定
+# 2. Streamlit 視口設定
 st.set_page_config(
     page_title="CREW DUTY ENGINE V2",
     page_icon="🚆",
@@ -16,54 +16,28 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-st.markdown(
-    """
-    <style>
-    header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], footer {
-        display: none !important; height: 0px !important;
-    }
-    html, body, .stApp, [data-testid="stAppViewContainer"] {
-        padding: 0 !important; margin: 0 !important; background-color: #070B10 !important;
-        overflow: hidden !important; height: 100dvh !important;
-    }
-    [data-testid="stMainBlockContainer"], .block-container {
-        padding: 0 !important; margin: 0 !important; max-width: 100% !important;
-        height: 100dvh !important; overflow: hidden !important;
-    }
-    div[data-testid="stElementContainer"] { margin: 0 !important; padding: 0 !important; }
-    iframe {
-        border: none !important; width: 100vw !important; height: 100dvh !important;
-        position: fixed !important; top: 0 !important; left: 0 !important; z-index: 999999 !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ---------------------------------------------------------
-# 3. Session State 登入狀態管理
+# 3. Session State 狀態與權限管理
 # ---------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "user_info" not in st.session_state:
     st.session_state.user_info = None
+if "admin_mode" not in st.session_state:
+    st.session_state.admin_mode = False
+if "last_sync_time" not in st.session_state:
+    st.session_state.last_sync_time = "2026-09-05 20:40"
 
-# 登入動作處理
-def login_user(emp_id, name):
-    st.session_state.authenticated = True
-    st.session_state.user_info = {
-        "emp_id": emp_id if emp_id else "A023001",
-        "name": name if name else "江立夫",
-        "unit": DEFAULT_UNIT,
-        "unit_name": UNIT_NAME,
-        "title": "車務幹部/組員",
-    }
-    st.rerun()
-
-# 登出動作處理
-if st.query_params.get("action") == "logout":
+# URL 參數登出/切換處理
+action = st.query_params.get("action")
+if action == "logout":
     st.session_state.authenticated = False
     st.session_state.user_info = None
+    st.session_state.admin_mode = False
+    st.query_params.clear()
+    st.rerun()
+elif action == "toggle_admin":
+    st.session_state.admin_mode = not st.session_state.admin_mode
     st.query_params.clear()
     st.rerun()
 
@@ -71,6 +45,22 @@ if st.query_params.get("action") == "logout":
 # 4. 未登入畫面 (Login UI)
 # ---------------------------------------------------------
 if not st.session_state.authenticated:
+    if action == "login":
+        emp_id = st.query_params.get("id", "A026047")
+        name = st.query_params.get("name", "江立夫")
+        
+        st.session_state.authenticated = True
+        st.session_state.user_info = {
+            "emp_id": emp_id,
+            "name": name,
+            "unit": DEFAULT_UNIT,
+            "unit_name": UNIT_NAME,
+            "title": "車務幹部/組員",
+            "role": "ADMIN"
+        }
+        st.query_params.clear()
+        st.rerun()
+
     LOGIN_HTML = """
     <!DOCTYPE html>
     <html lang="zh-Hant">
@@ -118,43 +108,97 @@ if not st.session_state.authenticated:
         <form onsubmit="handleLogin(event)">
           <div class="input-group">
             <label>乘務員編 (Emp ID)</label>
-            <input type="text" id="emp_id" placeholder="例如：A023001" value="A023001" required />
+            <input type="text" id="emp_id" value="A026047" required />
           </div>
           <div class="input-group">
             <label>姓名 (Name)</label>
-            <input type="text" id="emp_name" placeholder="例如：江立夫" value="江立夫" required />
+            <input type="text" id="emp_name" value="江立夫" required />
           </div>
           <button type="submit" class="btn-submit">登入乘務系統</button>
         </form>
       </div>
-
       <script>
         function handleLogin(e){
           e.preventDefault();
           const empId = document.getElementById('emp_id').value;
           const empName = document.getElementById('emp_name').value;
-          // 透過 URL 帶回登入資訊傳遞給 Python 處理
           window.location.href = `?action=login&id=${encodeURIComponent(empId)}&name=${encodeURIComponent(empName)}`;
         }
       </script>
     </body>
     </html>
     """
-    
-    # 檢查是否接收到前端表單的 URL 參數
-    action = st.query_params.get("action")
-    if action == "login":
-        emp_id = st.query_params.get("id", "A023001")
-        name = st.query_params.get("name", "江立夫")
-        st.query_params.clear()
-        login_user(emp_id, name)
-
     components.html(LOGIN_HTML, height=800, scrolling=False)
     st.stop()
 
 # ---------------------------------------------------------
-# 5. 已登入系統核心 (已驗證 User)
+# 5. 後台管理員介面 (Admin Management Panel)
 # ---------------------------------------------------------
+if st.session_state.admin_mode:
+    st.markdown(
+        """
+        <style>
+        header[data-testid="stHeader"], [data-testid="stToolbar"] { display: flex !important; }
+        .stApp { background-color: #070B10 !important; color: #ECF1F5 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.title("⚙️ CREW DUTY ENGINE · 後台管理控制台")
+    st.caption(f"目前管理員：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.subheader("📤 更新乘務大表 Excel")
+        uploaded_file = st.file_uploader("上傳月度班表 Excel (.xls, .xlsx)", type=["xls", "xlsx"])
+        
+        if uploaded_file is not None:
+            success, msg, df = process_uploaded_excel(uploaded_file)
+            if success:
+                st.success(msg)
+                st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+                st.subheader("📊 預覽大表數據庫結構")
+                st.dataframe(df.head(10), use_container_width=True)
+            else:
+                st.error(msg)
+                
+    with col2:
+        st.subheader("📌 系統資料庫狀態")
+        st.metric("當前基地", DEFAULT_UNIT)
+        st.metric("最後更新時間", st.session_state.last_sync_time)
+        st.divider()
+        if st.button("⬅️ 返回前台乘務 App", use_container_width=True):
+            st.session_state.admin_mode = False
+            st.rerun()
+    st.stop()
+
+# ---------------------------------------------------------
+# 6. 前台使用者 UI (已登入狀態)
+# ---------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], footer {
+        display: none !important; height: 0px !important;
+    }
+    html, body, .stApp, [data-testid="stAppViewContainer"] {
+        padding: 0 !important; margin: 0 !important; background-color: #070B10 !important;
+        overflow: hidden !important; height: 100dvh !important;
+    }
+    [data-testid="stMainBlockContainer"], .block-container {
+        padding: 0 !important; margin: 0 !important; max-width: 100% !important;
+        height: 100dvh !important; overflow: hidden !important;
+    }
+    div[data-testid="stElementContainer"] { margin: 0 !important; padding: 0 !important; }
+    iframe {
+        border: none !important; width: 100vw !important; height: 100dvh !important;
+        position: fixed !important; top: 0 !important; left: 0 !important; z-index: 999999 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 backend_user_info = st.session_state.user_info
 
 now = datetime.now()
@@ -230,54 +274,33 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 .section-label:first-child{margin-top:2px;}
 .panel{border:1px solid var(--line);border-radius:12px;background:var(--ink-800);padding:2px 12px;margin-bottom:12px;}
 
-/* Hero 卡片與倒數計時 */
 .hero{
-  border:1px solid var(--line);
-  border-radius:14px;
+  border:1px solid var(--line); border-radius:14px;
   background:linear-gradient(165deg, var(--ink-700), var(--ink-800));
-  padding:18px 16px;
-  margin-bottom:14px;
-  position:relative;
-  overflow:hidden;
+  padding:18px 16px; margin-bottom:14px; position:relative; overflow:hidden;
 }
 .hero::before{
-  content:"";
-  position:absolute; right:-40px; top:-40px;
-  width:160px;height:160px;border-radius:50%;
+  content:""; position:absolute; right:-40px; top:-40px; width:160px;height:160px;border-radius:50%;
   background:radial-gradient(circle, rgba(76,154,224,0.16), transparent 70%);
 }
 .hero-top{display:flex;justify-content:space-between;align-items:flex-start;}
 .hero-status{
-  display:inline-flex;align-items:center;gap:6px;
-  font-size:11.5px;color:var(--amber);font-weight:600;
-  background:var(--amber-dim); border:1px solid rgba(227,161,61,0.35);
-  padding:4px 9px;border-radius:20px;
+  display:inline-flex;align-items:center;gap:6px; font-size:11.5px;color:var(--amber);font-weight:600;
+  background:var(--amber-dim); border:1px solid rgba(227,161,61,0.35); padding:4px 9px;border-radius:20px;
 }
 .hero-status .dot{width:5px;height:5px;border-radius:50%;background:var(--amber);}
 .hero-cycle{font-size:10.5px;color:var(--dim-2);font-family:'IBM Plex Mono',monospace;}
 
 .hero-label{font-size:12px;color:var(--dim);margin-top:14px;}
 .countdown{display:flex;align-items:baseline;gap:10px;margin-top:6px;}
-.countdown .num{
-  font-family:'IBM Plex Mono',monospace;
-  font-size:36px;font-weight:600;letter-spacing:0.5px;color:var(--paper);
-  line-height:1;
-}
+.countdown .num{ font-family:'IBM Plex Mono',monospace; font-size:36px;font-weight:600;letter-spacing:0.5px;color:var(--paper); line-height:1; }
 .countdown .unit{font-size:12px;color:var(--dim-2);}
-.hero-next{
-  margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
-  display:flex;justify-content:space-between;align-items:center;
-}
+.hero-next{ margin-top:14px;padding-top:12px;border-top:1px solid var(--line); display:flex;justify-content:space-between;align-items:center; }
 .hero-next-left{display:flex;flex-direction:column;gap:2px;}
 .hero-next-date{font-size:12px;color:var(--dim);}
 .hero-next-times{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:var(--paper);}
-.hero-next-code{
-  font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--blue);
-  background:var(--blue-dim);border:1px solid rgba(76,154,224,0.3);
-  padding:4px 8px;border-radius:8px;font-weight:600;
-}
+.hero-next-code{ font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--blue); background:var(--blue-dim);border:1px solid rgba(76,154,224,0.3); padding:4px 8px;border-radius:8px;font-weight:600; }
 
-/* Duty Row */
 .duty-row{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--line-soft);cursor:pointer;}
 .duty-row:last-child{border-bottom:none;}
 .duty-date{width:36px;text-align:center;}
@@ -292,20 +315,14 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 .tag.amber{color:var(--amber);background:var(--amber-dim);}
 .tag.red{color:var(--red);background:var(--red-dim);}
 
-/* 班表狀態圖例列 (Legend Bar) */
-.legend-bar {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 2px 0;
-}
-.legend-chip {
-  font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center;
-}
+.legend-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 2px 0; }
+.legend-chip { font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center; }
 .legend-chip.grey { color: #8A98A8; background: rgba(122,135,148,0.18); border: 1px solid rgba(122,135,148,0.25); }
 .legend-chip.red { color: var(--red); background: var(--red-dim); border: 1px solid rgba(225,97,92,0.25); }
 .legend-chip.green { color: var(--green); background: var(--green-dim); border: 1px solid rgba(79,184,138,0.25); }
 .legend-chip.amber { color: var(--amber); background: var(--amber-dim); border: 1px solid rgba(227,161,61,0.25); }
 .legend-chip.purple { color: var(--purple); background: var(--purple-dim); border: 1px solid rgba(155,140,224,0.25); }
 
-/* 4 欄式 Tab bar */
 .tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:flex;background:rgba(14,20,28,0.95);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));z-index:30;}
 .tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 0;cursor:pointer;color:var(--dim-2);}
 .tab-item svg{width:18px;height:18px;stroke:var(--dim-2);fill:none;}
@@ -313,7 +330,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 .tab-item.active{color:var(--blue);}
 .tab-item.active svg{stroke:var(--blue);}
 
-/* Bottom Sheet */
 .sheet-overlay{position:fixed;inset:0;background:rgba(3,5,8,0.65);display:none;align-items:flex-end;justify-content:center;z-index:50;backdrop-filter:blur(4px);}
 .sheet-overlay.open{display:flex;}
 .sheet{width:100%;max-width:480px;background:var(--ink-800);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:10px 18px calc(20px + env(safe-area-inset-bottom,0px));max-height:80vh;overflow-y:auto;}
@@ -383,7 +399,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     <!-- 2. 我的班表 -->
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
-      
       <div class="legend-bar">
         <span class="legend-chip grey">偏駐</span>
         <span class="legend-chip red">休假日</span>
@@ -393,7 +408,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
         <span class="legend-chip purple">破輪</span>
         <span class="legend-chip grey">非正線勤務</span>
       </div>
-
       <div class="panel" id="scheduleContainer"></div>
     </section>
 
@@ -416,14 +430,14 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       <div class="section-label">帳號與權限</div>
       <div class="panel" style="padding:4px 12px;">
         <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">所屬單位</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profUnit">TTN</span></div>
-        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">權限層級</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;">CREW</span></div>
-        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">大表同步時間</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;">2026-09-05 20:40</span></div>
+        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">權限層級</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profRole">ADMIN</span></div>
+        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">大表同步時間</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profSyncTime">--</span></div>
       </div>
 
-      <div class="section-label">系統資訊與設定</div>
+      <div class="section-label">系統管理與設定</div>
       <div class="panel" style="padding:4px 12px;">
+        <div class="duty-row" onclick="handleAdminToggle()"><span style="font-size:13.5px;color:var(--blue);flex:1;font-weight:600;">⚙️ 開啟後台管理面板 (上傳大表)</span><span style="color:var(--dim-2);">›</span></div>
         <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">問題回報與建議</span><span style="color:var(--dim-2);">›</span></div>
-        <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">系統使用須知</span><span style="color:var(--dim-2);">›</span></div>
         <div class="duty-row" onclick="handleLogout()"><span style="font-size:13.5px;color:var(--red);flex:1;">登出系統</span><span style="color:var(--dim-2);">›</span></div>
       </div>
     </section>
@@ -456,38 +470,32 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 </div>
 
 <script>
-// 安全注入 JSON 資料
 const userData = __USER_DATA__;
 const scheduleData = __SCHEDULE_DATA__;
 const exchangeData = __EXCHANGE_DATA__;
 const statusData = __STATUS_DATA__;
+const syncTimeStr = "__LAST_SYNC_TIME__";
 
-// 渲染 Header & 個人資訊
 document.getElementById('headerUnit').textContent = userData.unit + ' · 已同步';
 document.getElementById('userName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + userData.title;
 
-// 渲染 Profile 頁面資訊
 document.getElementById('profileAvatar').textContent = userData.name ? userData.name.charAt(0) : 'CD';
 document.getElementById('profileName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('profileMeta').textContent = userData.unit + ' · ' + userData.title;
 document.getElementById('profUnit').textContent = userData.unit_name + ' (' + userData.unit + ')';
+document.getElementById('profRole').textContent = userData.role || 'ADMIN';
+document.getElementById('profSyncTime').textContent = syncTimeStr;
 
-// 登出觸發函數
-function handleLogout(){
-  if(confirm('確定要登出乘務系統嗎？')){
-    window.location.href = '?action=logout';
-  }
-}
+function handleAdminToggle(){ window.location.href = '?action=toggle_admin'; }
+function handleLogout(){ if(confirm('確定要登出乘務系統嗎？')){ window.location.href = '?action=logout'; } }
 
-// 渲染 Hero 英雄卡片內容
 document.getElementById('statusTxt').textContent = statusData.status_text;
 document.getElementById('heroCycle').textContent = statusData.current_cycle;
 document.getElementById('nextDate').textContent = statusData.next_duty_title;
 document.getElementById('nextTimes').textContent = statusData.next_duty_times;
 document.getElementById('nextCode').textContent = statusData.next_duty_code;
 
-// 精準時間差倒數計時引擎
 function pad(n){ return String(n).padStart(2,'0'); }
 function updateCountdown(){
   if(!statusData.target_timestamp_ms) {
@@ -498,11 +506,9 @@ function updateCountdown(){
   }
   const now = new Date().getTime();
   let diff = Math.max(0, statusData.target_timestamp_ms - now);
-
   const h = Math.floor(diff / (1000 * 60 * 60));
   const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
   const s = Math.floor((diff % (1000 * 60)) / 1000);
-
   document.getElementById('cd-h').textContent = pad(h);
   document.getElementById('cd-m').textContent = pad(m);
   document.getElementById('cd-s').textContent = pad(s);
@@ -510,7 +516,6 @@ function updateCountdown(){
 updateCountdown();
 setInterval(updateCountdown, 1000);
 
-// 渲染班表
 const schedContainer = document.getElementById('scheduleContainer');
 const days = scheduleData.week1 || [];
 
@@ -539,7 +544,6 @@ schedContainer.innerHTML = days.map(day => {
     </div>`;
 }).join('');
 
-// 渲染換班名單
 const exContainer = document.getElementById('exchangeContainer');
 const candidates = exchangeData['服勤員'] || [];
 exContainer.innerHTML = candidates.map(c => `
@@ -552,7 +556,6 @@ exContainer.innerHTML = candidates.map(c => `
   </div>
 `).join('');
 
-// 分頁切換邏輯
 function showTab(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
@@ -560,7 +563,6 @@ function showTab(name){
   document.getElementById('mainContainer').scrollTop = 0;
 }
 
-// 彈窗控制
 function openSyncSheet(){
   const sheet = document.getElementById('sheet');
   sheet.innerHTML = `
@@ -568,7 +570,7 @@ function openSyncSheet(){
     <div style="font-size:16px;font-weight:700;color:var(--paper);">大表同步資訊</div>
     <div style="font-size:12px;color:var(--dim-2);margin:4px 0 16px;">當前基地：${userData.unit_name} (${userData.unit})</div>
     <div style="background:var(--ink-700);padding:12px;border-radius:10px;border:1px solid var(--line);font-size:12.5px;color:var(--dim);">
-      資料庫最後更新：2026-09-05 20:40<br>
+      資料庫最後更新：${syncTimeStr}<br>
       目前狀態：<span style="color:var(--green);font-weight:600;">已是最新大表版本</span>
     </div>
     <button class="btn btn-primary" style="margin-top:16px;" onclick="closeSheet()">關閉視窗</button>
@@ -582,7 +584,6 @@ function closeSheetOnBg(e){ if(e.target.id==='sheetOverlay') closeSheet(); }
 </html>
 """
 
-# 安全注入 JSON
 HTML_CODE = RAW_HTML_TEMPLATE.replace(
     "__USER_DATA__", json.dumps(backend_user_info, ensure_ascii=False)
 ).replace(
@@ -591,6 +592,8 @@ HTML_CODE = RAW_HTML_TEMPLATE.replace(
     "__EXCHANGE_DATA__", json.dumps(backend_exchange_candidates, ensure_ascii=False)
 ).replace(
     "__STATUS_DATA__", json.dumps(duty_status, ensure_ascii=False)
+).replace(
+    "__LAST_SYNC_TIME__", st.session_state.last_sync_time
 )
 
 components.html(HTML_CODE, height=1000, scrolling=False)
