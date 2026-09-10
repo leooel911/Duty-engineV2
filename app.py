@@ -8,7 +8,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. 全域 CSS 設計變數注入 (暗黑科技風格 + 底部大拇指 Tab Bar)
+# 2. 全域 CSS 設計變數注入 (含隱藏 Streamlit 原生 Header)
 st.markdown(
     """
     <style>
@@ -34,6 +34,15 @@ st.markdown(
       --grey: #7A8794;
     }
 
+    /* 徹底隱藏 Streamlit 原生頂部 Header 工具列與彩色紅線 */
+    header[data-testid="stHeader"], 
+    [data-testid="stToolbar"], 
+    [data-testid="stDecoration"] {
+        display: none !important;
+        height: 0px !important;
+    }
+
+    /* 視口與底色鎖定 */
     html, body, .stApp, [data-testid="stAppViewContainer"], .main, .block-container {
         background-color: var(--ink-900) !important;
         color: var(--paper) !important;
@@ -44,15 +53,16 @@ st.markdown(
     }
 
     [data-testid="stMainBlockContainer"], .block-container {
-        padding: 0.5rem 0.5rem 5.5rem 0.5rem !important;
+        padding: 0.2rem 0.5rem 5.5rem 0.5rem !important;
         max-width: 480px !important;
         margin: 0 auto !important;
     }
 
+    /* 自訂 Topbar 頂部列 */
     .topbar-card {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 12px 14px; background: linear-gradient(var(--ink-900) 70%, transparent);
-        margin-bottom: 10px; position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px);
+        padding: 12px 14px; background: linear-gradient(var(--ink-900) 80%, transparent);
+        margin-bottom: 10px; position: sticky; top: 0; z-index: 999; backdrop-filter: blur(8px);
     }
     .brand-group { display: flex; align-items: center; gap: 9px; }
     .brand-mark {
@@ -71,12 +81,14 @@ st.markdown(
     }
     .unit-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 
+    /* Hero 卡片 */
     .hero-card {
         border: 1px solid var(--line); border-radius: 14px;
         background: linear-gradient(165deg, var(--ink-700), var(--ink-800));
         padding: 18px 16px; margin-bottom: 14px;
     }
 
+    /* 班表單條卡片 */
     .duty-row-card {
         display: flex; align-items: center; gap: 10px; padding: 10px 4px;
         border-bottom: 1px solid var(--line-soft);
@@ -101,6 +113,7 @@ st.markdown(
     .tag-pill.amber { color: var(--amber); background: var(--amber-dim); }
     .tag-pill.red { color: var(--red); background: var(--red-dim); }
 
+    /* Streamlit 原生 Radio 改造為底部大拇指 Tab Bar */
     div[data-testid="stRadio"] > label { display: none !important; }
     div[data-testid="stRadio"] > div {
         position: fixed !important; bottom: 0 !important; left: 50% !important;
