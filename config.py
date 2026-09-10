@@ -1,48 +1,38 @@
-# ==========================================
-# CREW DUTY ENGINE V2 - 全域設定與法規參數
-# ==========================================
+import io
+import json
+import os
+import sys
 
-# 1. 單位與基地設定
-DEFAULT_UNIT = "TTN"
-UNIT_NAME = "台中乘務區"
+# 🛠️ 自動加入專案根目錄，解決跨資料夾引用 config.py 問題
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-# 2. 勞基法與排班合規門檻 (單位：小時)
-COMPLIANCE_RULES = {
-    "MIN_REST_HOURS": 11.0,       # 法定最低班間休息門檻
-    "WARNING_REST_HOURS": 12.0,   # 臨界預警門檻
-    "LONG_DUTY_HOURS": 8.5,       # 長班工時標記門檻
-    "MAX_CONSECUTIVE_DAYS": 6,    # 連續出勤上限天數
-}
+import re
+import smtplib
+from datetime import date, datetime, timedelta, timezone
+from email.header import Header
+from email.mime.text import MIMEText
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-# 3. 班表語意色彩系統 (5色視覺語意 + 輔助色)
-COLOR_PALETTE = {
-    "blue": "#4C9AE0",        # 正常出勤 / 主色
-    "amber": "#E3A13D",       # 班間臨界 / 工時>8.5h / 國定假日
-    "red": "#E1615C",         # 班間不足 / 違規 / 排定休假
-    "green": "#4FB88A",       # 班間合規 / 特休 / 正常狀態
-    "purple": "#9B8CE0",      # 破輪 / 雙拼班
-    "grey": "#7A8794",        # 非正線 / 偏駐 / TOWN
-}
+import pandas as pd
+import streamlit as st
 
-# 4. 休假與非正線勤務代號對照
-OFF_DUTY_CODES = {
-    "DO": "休假",
-    "DO1": "排休 DO1",
-    "DO3X": "排休 DO3X",
-    "AL": "特休",
-    "SL": "病假",
-    "CL": "事假",
-}
+try:
+    from config import (
+        DATA_DIR,
+        LEAVE_CODES,
+        LOG_FILE,
+        NATIONAL_HOLIDAYS,
+        TAIWAN_TZ,
+        UNITS,
+    )
+except ImportError:
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    LOG_FILE = os.path.join(DATA_DIR, "activity_log.txt")
+    TAIWAN_TZ = timezone(timedelta(hours=8))
+    LEAVE_CODES = ["PAY", "FAC", "LEV", "MLP", "MTR", "UNP"]
+    NATIONAL_HOLIDAYS = {}
+    UNITS = {}
 
-SPECIAL_DUTY_CODES = {
-    "TOWN": {"label": "偏駐/外站", "color": "grey", "bar": "town"},
-    "TRAIN": {"label": "訓練勤務", "color": "purple", "bar": "split"},
-}
-
-# 5. 國定假日與疏運期清單 (可依年度隨時擴充)
-HOLIDAY_DATES = {
-    "2026-09-24": "中秋節",
-    "2026-09-25": "中秋疏運",
-    "2026-10-10": "國慶日",
-    "2026-10-11": "國慶疏運",
-}
+# (此處接續原本 utils.py 的完整內容)
