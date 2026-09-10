@@ -4,7 +4,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # 1. 載入核心模組與算力服務
-from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
 from modules.services import get_current_duty_status, process_uploaded_excel
 
@@ -17,17 +16,20 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 3. Session State 狀態與預設管理員權限
+# 3. Session State 狀態與動態基地單位管理
 # ---------------------------------------------------------
+if "current_unit_code" not in st.session_state:
+    st.session_state.current_unit_code = "TTN"
+if "current_unit_name" not in st.session_state:
+    st.session_state.current_unit_name = "台中乘務區"
+
 if "authenticated" not in st.session_state:
-    st.session_state.authenticated = True  # 預設為已驗證
+    st.session_state.authenticated = True
 
 if "user_info" not in st.session_state or st.session_state.user_info is None:
     st.session_state.user_info = {
         "emp_id": "A026047",
         "name": "江立夫",
-        "unit": DEFAULT_UNIT,
-        "unit_name": UNIT_NAME,
         "title": "車務幹部/組員",
         "role": "ADMIN"
     }
@@ -38,7 +40,7 @@ if "admin_mode" not in st.session_state:
 if "last_sync_time" not in st.session_state:
     st.session_state.last_sync_time = "2026-09-05 20:40"
 
-# URL 動作事件處理 (頂層主網址)
+# URL 動作事件處理
 action = st.query_params.get("action")
 if action == "logout":
     st.session_state.authenticated = False
@@ -63,8 +65,6 @@ if not st.session_state.authenticated:
         st.session_state.user_info = {
             "emp_id": emp_id,
             "name": name,
-            "unit": DEFAULT_UNIT,
-            "unit_name": UNIT_NAME,
             "title": "車務幹部/組員",
             "role": "ADMIN"
         }
@@ -142,7 +142,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ---------------------------------------------------------
-# 5. 後台管理員控制台 (Admin Management Panel)
+# 5. 後台管理員控制台 (Admin Panel - 自動抓取基地)
 # ---------------------------------------------------------
 if st.session_state.admin_mode:
     st.markdown(
@@ -163,10 +163,14 @@ if st.session_state.admin_mode:
         uploaded_file = st.file_uploader("選擇月度班表 Excel 檔案 (.xls, .xlsx)", type=["xls", "xlsx"])
         
         if uploaded_file is not None:
-            success, msg, df = process_uploaded_excel(uploaded_file)
+            success, msg, df, (unit_code, unit_name) = process_uploaded_excel(uploaded_file)
             if success:
                 st.success(msg)
+                # 動態寫入解析到的基地資訊
+                st.session_state.current_unit_code = unit_code
+                st.session_state.current_unit_name = unit_name
                 st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+                
                 st.subheader("📊 班表資料庫即時預覽")
                 st.dataframe(df.head(15), use_container_width=True)
             else:
@@ -174,8 +178,8 @@ if st.session_state.admin_mode:
                 
     with col2:
         st.subheader("📌 系統與資料庫狀態")
-        st.metric("當前基地", DEFAULT_UNIT)
-        st.metric("大表最後同步時間", st.session_state.last_sync_time)
+        st.metric("大表識別基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
+        st.metric("最後同步時間", st.session_state.last_sync_time)
         st.divider()
         if st.button("⬅️ 切換回前台乘務 App 視角", use_container_width=True):
             st.session_state.admin_mode = False
@@ -183,7 +187,7 @@ if st.session_state.admin_mode:
     st.stop()
 
 # ---------------------------------------------------------
-# 6. 前台使用者 UI
+# 6. 前台使用者 UI (動態注入基地資訊)
 # ---------------------------------------------------------
 st.markdown(
     """
@@ -209,7 +213,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-backend_user_info = st.session_state.user_info
+# 帶入動態基地單位
+backend_user_info = {
+    "emp_id": st.session_state.user_info["emp_id"],
+    "name": st.session_state.user_info["name"],
+    "unit": st.session_state.current_unit_code,
+    "unit_name": st.session_state.current_unit_name,
+    "title": st.session_state.user_info["title"],
+    "role": st.session_state.user_info.get("role", "CREW")
+}
 
 now = datetime.now()
 t_day1 = now + timedelta(days=1)
@@ -439,7 +451,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 
       <div class="section-label">帳號與權限</div>
       <div class="panel" style="padding:4px 12px;">
-        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">所屬單位</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profUnit">TTN</span></div>
+        <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">所屬單位</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profUnit">--</span></div>
         <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">權限層級</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profRole">ADMIN</span></div>
         <div class="duty-row" style="cursor:default;"><span style="font-size:13.5px;color:var(--paper);">大表同步時間</span><span style="font-size:12.5px;color:var(--dim-2);font-family:monospace;" id="profSyncTime">--</span></div>
       </div>
@@ -473,7 +485,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     </div>
   </nav>
 
-  <!-- Bottom Sheet Modal -->
   <div class="sheet-overlay" id="sheetOverlay" onclick="closeSheetOnBg(event)">
     <div class="sheet" id="sheet"></div>
   </div>
@@ -492,12 +503,11 @@ document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + 
 
 document.getElementById('profileAvatar').textContent = userData.name ? userData.name.charAt(0) : 'CD';
 document.getElementById('profileName').textContent = userData.name + ' (' + userData.emp_id + ')';
-document.getElementById('profileMeta').textContent = userData.unit + ' · ' + userData.title;
+document.getElementById('profileMeta').textContent = userData.unit_name + ' · ' + userData.title;
 document.getElementById('profUnit').textContent = userData.unit_name + ' (' + userData.unit + ')';
 document.getElementById('profRole').textContent = userData.role || 'ADMIN';
 document.getElementById('profSyncTime').textContent = syncTimeStr;
 
-// 使用 window.top.location 確保能順利觸發 Streamlit 父頁面網址刷新
 function handleAdminToggle(){ 
   window.top.location.href = window.top.location.pathname + '?action=toggle_admin'; 
 }
