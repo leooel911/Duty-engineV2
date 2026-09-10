@@ -1,213 +1,252 @@
 """
-CREW DUTY ENGINE V2 - Master Schedule Parser & Search Engine
-100% 動態大表解析器 (限定單位：北轉 TTN / 中轉 TTC / 南轉 TTS)
+CREW DUTY ENGINE V2 - Core Bridge Services
+繼承 V1 真實大表解析算力（TD/TM/TA 三表連動、parse_cell 班別拆解、合規計算）
 """
-from datetime import datetime, timedelta
+import json
+import os
 import re
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
 import pandas as pd
-from modules.utils import calc_duty_duration, calc_rest_interval, parse_time_str
+import streamlit as st
+from config import DATA_DIR, SYSTEM_CONFIG_FILE, UNITS, WHITELIST_FILE
+from modules.utils import (
+    calculate_consecutive_work_days,
+    check_shift_legality,
+    get_employee_name,
+    is_cell_off_day,
+    is_overtime,
+    is_town_shift,
+    parse_cell,
+    safe_read_excel,
+    translate_train_code,
+)
 
-def extract_unit_from_excel(df: pd.DataFrame):
-    """動態掃描 Excel 表頭，辨識基地單位 (嚴格限定：北轉 TTN / 中轉 TTC / 南轉 TTS)"""
-    if df is None or df.empty:
-        return "TTN", "北轉"
+# ---------------------------------------------------------
+# 1. 載入全站系統設定與白名單
+# ---------------------------------------------------------
+def load_system_config() -> Dict[str, Any]:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(SYSTEM_CONFIG_FILE):
+        return {}
+    try:
+        with open(SYSTEM_CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-    header_text = " ".join(df.iloc[:5].fillna("").astype(str).values.flatten())
+def save_system_config(config_dict: Dict[str, Any]) -> bool:
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(SYSTEM_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_dict, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception:
+        return False
 
-    unit_mapping = {
-        "台北": ("TTN", "北轉"),
-        "北轉": ("TTN", "北轉"),
-        "台中": ("TTC", "中轉"),
-        "中轉": ("TTC", "中轉"),
-        "左營": ("TTS", "南轉"),
-        "南轉": ("TTS", "南轉"),
-    }
+def load_whitelist(unit_code: str = "TTN") -> Dict[str, Any]:
+    whitelist_path = WHITELIST_FILE
+    if os.path.exists(whitelist_path):
+        try:
+            with open(whitelist_path, "r", encoding="utf-8") as f:
+                full_data = json.load(f)
+                return full_data.get(unit_code, {})
+        except Exception:
+            return {}
+    return {}
 
-    for key, (code, name) in unit_mapping.items():
-        if key in header_text:
-            return code, name
+def is_user_allowed(selected_unit: str, emp_id: Any) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    emp_id_str = str(emp_id).strip().upper()
+    if emp_id_str == "A":
+        return True, {"emp_id": "A", "name": "全域通行", "role": "VIP_USER"}
+    
+    wl = load_whitelist(selected_unit)
+    if emp_id_str in wl:
+        info = wl[emp_id_str]
+        return True, {"emp_id": emp_id_str, "name": info.get("name", "組員"), "role": info.get("role", "VIP")}
+    return False, None
 
-    return "TTN", "北轉"
+def verify_crew_membership(selected_unit: str, emp_id: str) -> bool:
+    emp_id_str = str(emp_id).strip().upper()
+    unit_files = UNITS.get(selected_unit, {})
+    for role_name, file_path in unit_files.items():
+        if isinstance(file_path, str) and os.path.exists(file_path):
+            try:
+                df = safe_read_excel(file_path, header=3)
+                for _, row in df.iterrows():
+                    if str(row.iloc[0]).strip().upper() == emp_id_str:
+                        return True
+            except Exception:
+                pass
+    return False
 
-def parse_cell_duty_info(cell_value: str):
-    """從 Excel 儲存格提取班號與簽到退時間 (如 'NG0001\\n05:26-15:06' 或 'NF0018 07:24~15:24')"""
-    if not isinstance(cell_value, str) or not cell_value.strip() or cell_value.strip().lower() == "nan":
+# ---------------------------------------------------------
+# 2. V2 前台專用：真實全月班表 JSON 解析器
+# ---------------------------------------------------------
+def get_crew_full_schedule_json(target_emp: str, unit_code: str = "TTN") -> Dict[str, Any]:
+    """
+    調用 V1 process_file_data 真實算力，將班表轉為 V2 redesign.html 所需之 JSON 格式
+    """
+    target_emp_str = str(target_emp).strip().upper()
+    unit_files = UNITS.get(unit_code, UNITS.get("TTN", {}))
+
+    found_row, found_df, role_title = None, None, "服勤員"
+    emp_id, emp_name = target_emp_str, "組員"
+
+    # 搜尋三大表 (駕駛、列車長、服勤員)
+    for role, path in unit_files.items():
+        if isinstance(path, str) and os.path.exists(path):
+            try:
+                df = safe_read_excel(path, header=3)
+                df.columns = [str(c).strip() for c in df.columns]
+                for _, row in df.iterrows():
+                    r_id = str(row.iloc[0]).strip().upper()
+                    r_name = str(row.iloc[1]).strip().upper()
+                    if r_id == target_emp_str or r_name == target_emp_str:
+                        found_row, found_df, role_title = row, df, role
+                        emp_id = str(row.iloc[0]).strip()
+                        emp_name = str(row.iloc[1]).strip()
+                        break
+                if found_row is not None:
+                    break
+            except Exception:
+                pass
+
+    if found_row is None:
         return None
 
-    text = cell_value.strip()
-    times = re.findall(r"(\d{1,2}:\d{2})", text)
-    
-    # 判斷是否為休假格
-    if any(k in text.upper() for k in ["DO", "OFF", "休", "特休", "例休"]):
-        code = text.split()[0] if text.split() else "DO1"
-        return {"off": code, "tags": ["休假日"]}
+    all_cols = list(found_df.columns)
+    days_schedule = []
+    day_counter = 1
 
-    start_t, end_t = "07:30", "15:30"
-    if len(times) >= 2:
-        start_t, end_t = times[0], times[1]
+    for col_idx in range(2, len(all_cols)):
+        col_name = str(all_cols[col_idx]).strip()
+        m = re.search(r"(\d+/\d+)", col_name)
+        if not m:
+            continue
 
-    code = text.split("\n")[0].split()[0] if text else "DUTY"
-    hrs_num, dur_str = calc_duty_duration(start_t, end_t)
+        raw_cell = found_row.iloc[col_idx]
+        parsed = parse_cell(raw_cell)
+        is_off = is_cell_off_day(raw_cell)
 
-    tags = []
-    if hrs_num > 8.5:
-        tags.append("工時>8.5h")
+        # 日期與星期
+        d_str = m.group(1)
+        wd_list = ["日", "一", "二", "三", "四", "五", "六"]
+        try:
+            m_v, d_v = map(int, d_str.split("/"))
+            wd_str = wd_list[datetime(2026, m_v, d_v).weekday()]
+        except Exception:
+            wd_str = "一"
+
+        item = {
+            "d": day_counter,
+            "date_str": d_str,
+            "wd": wd_str
+        }
+
+        if is_off and not parsed["start"]:
+            item["off"] = parsed["train"] if parsed["train"] != "無" else "DO"
+            item["barType"] = "off"
+            item["tags"] = ["休假日"]
+        else:
+            tags = []
+            if is_overtime(parsed["hours"], parsed["train"], parsed["note"]):
+                tags.append("工時>8.5h")
+            if is_town_shift(parsed["train"], parsed["note"]):
+                tags.append("非正線")
+
+            # 班間休息合規檢查 (呼叫 V1 check_shift_legality)
+            is_legal, warn_msg, rest_info = check_shift_legality(found_row, col_idx, all_cols)
+            rest_val = rest_info.get("min_interval")
+            
+            rest_tag = "green"
+            if rest_val is not None:
+                if rest_val < 11.0:
+                    rest_tag = "red"
+                elif rest_val < 12.0:
+                    rest_tag = "amber"
+
+            item["code"] = translate_train_code(parsed["train"])
+            item["start"] = parsed["start"] or "--:--"
+            item["end"] = parsed["end"] or "--:--"
+            item["dur"] = parsed["hours"] or "--"
+            item["rest"] = f"{rest_val}h" if rest_val else "12.0h"
+            item["restTag"] = rest_tag
+            item["tags"] = tags
+
+        days_schedule.append(item)
+        day_counter += 1
 
     return {
-        "code": code,
-        "start": start_t,
-        "end": end_t,
-        "dur": dur_str,
-        "tags": tags
+        "emp_id": emp_id,
+        "name": emp_name,
+        "role_title": role_title,
+        "unit": unit_code,
+        "unit_name": "北轉" if unit_code == "TTN" else ("中轉" if unit_code == "TTC" else "南轉"),
+        "schedule": days_schedule
     }
 
-def parse_master_excel(file_obj):
+# ---------------------------------------------------------
+# 3. V2 前台專用：動態換班快搜算力引擎
+# ---------------------------------------------------------
+def search_exchange_candidates_v2(unit_code: str = "TTN", target_date: str = "9/15", time_from: str = "05:00", time_to: str = "10:00") -> Dict[str, List[Dict[str, Any]]]:
     """
-    全動態大表 Excel 解析主函式
-    讀取包含所有組員月度班表的 Excel 檔，回傳所有組員之結構化資料
+    從 Excel 檔案中檢索符合特定 Sign-In 時段區間之組員
     """
-    if file_obj is None:
-        return False, {}, None, ("TTN", "北轉")
+    unit_files = UNITS.get(unit_code, UNITS.get("TTN", {}))
+    result = {"服勤員": [], "駕駛": [], "列車長": []}
 
-    try:
-        excel_file = pd.ExcelFile(file_obj)
-        df = excel_file.parse(excel_file.sheet_names[0], header=None)
-        unit_code, unit_name = extract_unit_from_excel(df)
+    for role_name, file_path in unit_files.items():
+        if not (isinstance(file_path, str) and os.path.exists(file_path)):
+            continue
 
-        # 搜尋表頭中的日期列與日期數
-        now = datetime.now()
-        rosters = {}  # emp_id -> crew_info + daily_schedule
+        try:
+            df = safe_read_excel(file_path, header=3)
+            df.columns = [str(c).strip() for c in df.columns]
 
-        # 遍歷所有 Dataframe 列尋找組員資料列
-        for idx, row in df.iterrows():
-            row_vals = row.fillna("").astype(str).tolist()
-            row_str = " ".join(row_vals)
+            # 尋找對應日期欄位
+            target_col_idx = -1
+            for idx, col in enumerate(df.columns[2:], start=2):
+                m = re.search(r"(\d+/\d+)", str(col))
+                if m and m.group(1) == target_date:
+                    target_col_idx = idx
+                    break
 
-            # 搜尋格式如 A026047 或姓名列
-            emp_match = re.search(r"([A-Z]\d{6})", row_str)
-            if not emp_match:
+            if target_col_idx == -1:
                 continue
 
-            emp_id = emp_match.group(1)
-            
-            # 尋找姓名與職稱
-            name = "組員"
-            role_title = "服勤員"
-            for v in row_vals[:5]:
-                v_clean = v.strip()
-                if v_clean and not re.search(r"[A-Z]\d{6}", v_clean) and len(v_clean) <= 4:
-                    if any(c in v_clean for c in ["員", "長", "駕駛", "車務", "服勤"]):
-                        role_title = "駕駛" if "駕" in v_clean else ("列車長" if "長" in v_clean else "服勤員")
-                    elif len(v_clean) >= 2:
-                        name = v_clean
-
-            # 解析 1~31 日班表
-            days_schedule = []
-            prev_end_date = None
-            prev_end_time = None
-
-            day_counter = 1
-            for col_idx in range(3, len(row_vals)):
-                if day_counter > 31:
-                    break
-                
-                cell_raw = row_vals[col_idx]
-                duty_info = parse_cell_duty_info(cell_raw)
-                
-                if not duty_info:
-                    day_counter += 1
+            for _, row in df.iterrows():
+                emp_id = str(row.iloc[0]).strip().upper()
+                emp_name = str(row.iloc[1]).strip()
+                if not emp_id or emp_id in ["NAN", "NONE", ""]:
                     continue
 
-                curr_date_str = f"{now.year}-{now.month:02d}-{day_counter:02d}"
-                wd_list = ["日", "一", "二", "三", "四", "五", "六"]
-                try:
-                    wd_str = wd_list[datetime.strptime(curr_date_str, "%Y-%m-%d").weekday()]
-                except Exception:
-                    wd_str = "一"
+                cell_raw = row.iloc[target_col_idx]
+                parsed = parse_cell(cell_raw)
+                start_t = parsed["start"]
 
-                entry = {
-                    "d": day_counter,
-                    "wd": wd_str,
-                    "full_date": curr_date_str
-                }
+                if start_t and time_from <= start_t <= time_to:
+                    # 班間合規檢查
+                    _, _, rest_info = check_shift_legality(row, target_col_idx, df.columns)
+                    rest_val = rest_info.get("min_interval")
+                    rest_tag = "green"
+                    if rest_val and rest_val < 11.0:
+                        rest_tag = "red"
+                    elif rest_val and rest_val < 12.0:
+                        rest_tag = "amber"
 
-                if "off" in duty_info:
-                    entry["off"] = duty_info["off"]
-                    entry["barType"] = "off"
-                    entry["tags"] = duty_info["tags"]
-                    prev_end_date = None
-                    prev_end_time = None
-                else:
-                    entry["code"] = duty_info["code"]
-                    entry["start"] = duty_info["start"]
-                    entry["end"] = duty_info["end"]
-                    entry["dur"] = duty_info["dur"]
-                    entry["tags"] = duty_info["tags"]
-
-                    # 計算與前一班之班間休息時間
-                    if prev_end_date and prev_end_time:
-                        rest_str, rest_tag = calc_rest_interval(prev_end_date, prev_end_time, curr_date_str, duty_info["start"])
-                        entry["rest"] = rest_str
-                        entry["restTag"] = rest_tag
-
-                    prev_end_date = curr_date_str
-                    prev_end_time = duty_info["end"]
-
-                days_schedule.append(entry)
-                day_counter += 1
-
-            rosters[emp_id] = {
-                "emp_id": emp_id,
-                "name": name,
-                "role_title": role_title,
-                "unit": unit_code,
-                "unit_name": unit_name,
-                "schedule": days_schedule
-            }
-
-        return True, rosters, df, (unit_code, unit_name)
-
-    except Exception as e:
-        print(f"Excel 動態解析出錯: {e}")
-        return False, {}, None, ("TTN", "北轉")
-
-def build_exchange_candidates_dynamic(rosters: dict, target_date_idx: int = 15, time_from: str = "05:00", time_to: str = "10:00"):
-    """根據大表動態計算可換班組員名單 (無 hardcode)"""
-    result = {"服勤員": [], "駕駛": [], "列車長": []}
-    
-    tf_min = parse_time_str(time_from)
-    tt_min = parse_time_str(time_to)
-    if not tf_min or not tt_min:
-        return result
-
-    tf_val = tf_min.hour * 60 + tf_min.minute
-    tt_val = tt_min.hour * 60 + tt_min.minute
-
-    for emp_id, crew in rosters.items():
-        sched = crew.get("schedule", [])
-        matching_day = next((d for d in sched if d.get("d") == target_date_idx and "start" in d), None)
-        if not matching_day:
-            continue
-
-        st_obj = parse_time_str(matching_day["start"])
-        if not st_obj:
-            continue
-
-        st_val = st_obj.hour * 60 + st_obj.minute
-        if tf_val <= st_val <= tt_val:
-            role = crew.get("role_title", "服勤員")
-            if role not in result:
-                result[role] = []
-
-            result[role].append({
-                "id": emp_id,
-                "name": crew["name"],
-                "start": matching_day["start"],
-                "end": matching_day["end"],
-                "dur": matching_day["dur"],
-                "restBefore": matching_day.get("rest", "12.0h"),
-                "restTag": matching_day.get("restTag", "green"),
-                "streak": f"當日勤務 · {matching_day['code']}"
-            })
+                    result[role_name].append({
+                        "id": emp_id,
+                        "name": emp_name,
+                        "start": start_t,
+                        "end": parsed["end"] or "--:--",
+                        "dur": parsed["hours"] or "8h00m",
+                        "restBefore": f"{rest_val}h" if rest_val else "12.0h",
+                        "restTag": rest_tag,
+                        "streak": f"勤務：{translate_train_code(parsed['train'])}"
+                    })
+        except Exception as e:
+            print(f"快搜計算出錯 ({role_name}): {e}")
 
     return result
