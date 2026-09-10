@@ -6,9 +6,9 @@ import streamlit.components.v1 as components
 # 1. 載入核心模組與算力服務
 from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
-from modules.services import get_current_duty_status, parse_excel_roster
+from modules.services import get_current_duty_status
 
-# 2. Streamlit 視口重置
+# 2. Streamlit 視口與頁面設定
 st.set_page_config(
     page_title="CREW DUTY ENGINE V2",
     page_icon="🚆",
@@ -41,8 +41,122 @@ st.markdown(
 )
 
 # ---------------------------------------------------------
-# 3. 動態時間計算 (基於目前真實時間產生對應班別)
+# 3. Session State 登入狀態管理
 # ---------------------------------------------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+
+# 登入動作處理
+def login_user(emp_id, name):
+    st.session_state.authenticated = True
+    st.session_state.user_info = {
+        "emp_id": emp_id if emp_id else "A023001",
+        "name": name if name else "江立夫",
+        "unit": DEFAULT_UNIT,
+        "unit_name": UNIT_NAME,
+        "title": "車務幹部/組員",
+    }
+    st.rerun()
+
+# 登出動作處理
+if st.query_params.get("action") == "logout":
+    st.session_state.authenticated = False
+    st.session_state.user_info = None
+    st.query_params.clear()
+    st.rerun()
+
+# ---------------------------------------------------------
+# 4. 未登入畫面 (Login UI)
+# ---------------------------------------------------------
+if not st.session_state.authenticated:
+    LOGIN_HTML = """
+    <!DOCTYPE html>
+    <html lang="zh-Hant">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+TC:wght@400;600;700&display=swap');
+      body {
+        margin:0; padding:20px; background:#070B10; color:#ECF1F5;
+        font-family:'IBM Plex Sans TC', sans-serif;
+        display:flex; align-items:center; justify-content:center; height:100vh;
+      }
+      .login-card {
+        width:100%; max-width:360px; background:#0E141C; border:1px solid #232E3A;
+        border-radius:16px; padding:28px 24px; text-align:center;
+      }
+      .logo {
+        width:48px; height:48px; background:#141C26; border:1px solid #232E3A;
+        border-radius:12px; margin:0 auto 16px; display:flex; align-items:center;
+        justify-content:center; font-family:'IBM Plex Mono', monospace;
+        font-weight:700; color:#4C9AE0; font-size:18px;
+      }
+      h2 { font-size:18px; font-weight:700; margin:0 0 4px; }
+      p { font-size:12px; color:#59636E; margin:0 0 24px; }
+      .input-group { text-align:left; margin-bottom:14px; }
+      label { font-size:11px; font-weight:600; color:#8492A1; display:block; margin-bottom:6px; }
+      input {
+        width:100%; padding:10px 12px; background:#141C26; border:1px solid #232E3A;
+        border-radius:8px; color:#ECF1F5; font-size:14px; font-family:'IBM Plex Mono', monospace;
+        box-sizing:border-box; outline:none;
+      }
+      input:focus { border-color:#4C9AE0; }
+      .btn-submit {
+        width:100%; padding:12px; background:#4C9AE0; color:#070B10; font-weight:700;
+        font-size:14px; border:none; border-radius:8px; cursor:pointer; margin-top:10px;
+      }
+    </style>
+    </head>
+    <body>
+      <div class="login-card">
+        <div class="logo">CD</div>
+        <h2>CREW DUTY ENGINE</h2>
+        <p>請輸入乘務員編號進行系統認證</p>
+        <form onsubmit="handleLogin(event)">
+          <div class="input-group">
+            <label>乘務員編 (Emp ID)</label>
+            <input type="text" id="emp_id" placeholder="例如：A023001" value="A023001" required />
+          </div>
+          <div class="input-group">
+            <label>姓名 (Name)</label>
+            <input type="text" id="emp_name" placeholder="例如：江立夫" value="江立夫" required />
+          </div>
+          <button type="submit" class="btn-submit">登入乘務系統</button>
+        </form>
+      </div>
+
+      <script>
+        function handleLogin(e){
+          e.preventDefault();
+          const empId = document.getElementById('emp_id').value;
+          const empName = document.getElementById('emp_name').value;
+          // 透過 URL 帶回登入資訊傳遞給 Python 處理
+          window.location.href = `?action=login&id=${encodeURIComponent(empId)}&name=${encodeURIComponent(empName)}`;
+        }
+      </script>
+    </body>
+    </html>
+    """
+    
+    # 檢查是否接收到前端表單的 URL 參數
+    action = st.query_params.get("action")
+    if action == "login":
+        emp_id = st.query_params.get("id", "A023001")
+        name = st.query_params.get("name", "江立夫")
+        st.query_params.clear()
+        login_user(emp_id, name)
+
+    components.html(LOGIN_HTML, height=800, scrolling=False)
+    st.stop()
+
+# ---------------------------------------------------------
+# 5. 已登入系統核心 (已驗證 User)
+# ---------------------------------------------------------
+backend_user_info = st.session_state.user_info
+
 now = datetime.now()
 t_day1 = now + timedelta(days=1)
 t_day2 = now + timedelta(days=2)
@@ -68,14 +182,6 @@ backend_schedule = {
     "week3": []
 }
 
-backend_user_info = {
-    "emp_id": "A023001",
-    "name": "江立夫",
-    "unit": DEFAULT_UNIT,
-    "unit_name": UNIT_NAME,
-    "title": "車務幹部/組員",
-}
-
 backend_exchange_candidates = {
     "服勤員": [
         {"id": "A024118", "name": "林彥廷", "start": "06:01", "end": "16:01", "dur": "10h00m", "restBefore": "13.2h", "restTag": "green", "streak": "連續值勤 2 日"},
@@ -87,9 +193,6 @@ backend_exchange_candidates = {
     "列車長": []
 }
 
-# ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (對齊終端視覺與圖例列)
-# ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-Hant">
@@ -191,19 +294,10 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 
 /* 班表狀態圖例列 (Legend Bar) */
 .legend-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-  padding: 2px 0;
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 2px 0;
 }
 .legend-chip {
-  font-size: 10.5px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
+  font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center;
 }
 .legend-chip.grey { color: #8A98A8; background: rgba(122,135,148,0.18); border: 1px solid rgba(122,135,148,0.25); }
 .legend-chip.red { color: var(--red); background: var(--red-dim); border: 1px solid rgba(225,97,92,0.25); }
@@ -290,7 +384,6 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
       
-      <!-- 班表狀態圖例標籤列 -->
       <div class="legend-bar">
         <span class="legend-chip grey">偏駐</span>
         <span class="legend-chip red">休假日</span>
@@ -313,7 +406,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     <!-- 4. 我的 (Profile) -->
     <section class="screen" id="screen-profile">
       <div style="display:flex;align-items:center;gap:12px;padding:6px 2px 16px;">
-        <div style="width:44px;height:44px;border-radius:10px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:monospace;font-weight:700;color:var(--blue);font-size:15px;" id="profileAvatar">江</div>
+        <div style="width:44px;height:44px;border-radius:10px;background:var(--ink-700);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:monospace;font-weight:700;color:var(--blue);font-size:15px;" id="profileAvatar">--</div>
         <div>
           <div style="font-size:15px;font-weight:600;" id="profileName">--</div>
           <div style="font-size:11px;color:var(--dim-2);margin-top:2px;font-family:monospace;" id="profileMeta">--</div>
@@ -331,7 +424,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
       <div class="panel" style="padding:4px 12px;">
         <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">問題回報與建議</span><span style="color:var(--dim-2);">›</span></div>
         <div class="duty-row"><span style="font-size:13.5px;color:var(--paper);flex:1;">系統使用須知</span><span style="color:var(--dim-2);">›</span></div>
-        <div class="duty-row"><span style="font-size:13.5px;color:var(--red);flex:1;">登出系統</span><span style="color:var(--dim-2);">›</span></div>
+        <div class="duty-row" onclick="handleLogout()"><span style="font-size:13.5px;color:var(--red);flex:1;">登出系統</span><span style="color:var(--dim-2);">›</span></div>
       </div>
     </section>
   </main>
@@ -379,6 +472,13 @@ document.getElementById('profileAvatar').textContent = userData.name ? userData.
 document.getElementById('profileName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('profileMeta').textContent = userData.unit + ' · ' + userData.title;
 document.getElementById('profUnit').textContent = userData.unit_name + ' (' + userData.unit + ')';
+
+// 登出觸發函數
+function handleLogout(){
+  if(confirm('確定要登出乘務系統嗎？')){
+    window.location.href = '?action=logout';
+  }
+}
 
 // 渲染 Hero 英雄卡片內容
 document.getElementById('statusTxt').textContent = statusData.status_text;
@@ -482,7 +582,7 @@ function closeSheetOnBg(e){ if(e.target.id==='sheetOverlay') closeSheet(); }
 </html>
 """
 
-# 使用 .replace() 安全注入 JSON
+# 安全注入 JSON
 HTML_CODE = RAW_HTML_TEMPLATE.replace(
     "__USER_DATA__", json.dumps(backend_user_info, ensure_ascii=False)
 ).replace(
