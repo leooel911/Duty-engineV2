@@ -1,6 +1,6 @@
 """
-CREW DUTY ENGINE V2 - Main Streamlit Application Entrypoint
-100% 動態資料注入、使用者/管理者切換、純滿版無縫 UI
+CREW DUTY ENGINE V2 - Main Streamlit Application
+完全動態資料驅動（零寫死假資料）
 """
 import json
 from datetime import datetime
@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 
 from modules.services import parse_master_excel, build_exchange_candidates_dynamic
 
-# 1. 頁面初始化
+# 1. 頁面配置
 st.set_page_config(
     page_title="CREW DUTY ENGINE — Dispatch Terminal",
     page_icon="🚆",
@@ -17,62 +17,63 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 2. 全域 Session State 狀態初始化
+# 2. 全域 Session State 初始化（初始狀況下完全沒有班表資料）
 if "all_rosters" not in st.session_state:
     st.session_state.all_rosters = {}
 if "current_emp_id" not in st.session_state:
-    st.session_state.current_emp_id = "A026047"
+    st.session_state.current_emp_id = None
 if "current_unit_code" not in st.session_state:
-    st.session_state.current_unit_code = "TTN"
+    st.session_state.current_unit_code = "--"
 if "current_unit_name" not in st.session_state:
-    st.session_state.current_unit_name = "北轉"
+    st.session_state.current_unit_name = "未載入"
 if "last_sync_time" not in st.session_state:
-    st.session_state.last_sync_time = "2026-09-05 20:40"
+    st.session_state.last_sync_time = "尚未同步"
 if "user_role" not in st.session_state:
-    st.session_state.user_role = "ADMIN"  # ADMIN / CREW
+    st.session_state.user_role = "ADMIN"
 
-# 3. 側邊欄：管理者與組員切換系統抽屜
+# 3. 側邊欄：真實大表檔案上傳與人員選擇器
 with st.sidebar:
-    st.title("⚙️ 乘務調度後台控制台")
-    st.caption("CREW DUTY ENGINE V2 · System Management")
+    st.title("⚙️ 乘務調度控制台")
+    st.caption("CREW DUTY ENGINE V2 · Real-Data Engine")
     st.divider()
 
     # 權限切換
-    role_option = st.radio("系統權限切換", ["👑 系統管理者 (ADMIN)", "🚆 一般乘務組員 (CREW)"], index=0)
+    role_option = st.radio("系統權限", ["👑 系統管理者 (ADMIN)", "🚆 一般乘務組員 (CREW)"], index=0)
     st.session_state.user_role = "ADMIN" if "ADMIN" in role_option else "CREW"
 
-    if st.session_state.user_role == "ADMIN":
-        st.subheader("📤 乘務大表動態解析上傳")
-        uploaded_file = st.file_uploader("上傳月度班表 Excel (.xls, .xlsx)", type=["xls", "xlsx"])
-        
-        if uploaded_file is not None:
-            success, rosters, df, (u_code, u_name) = parse_master_excel(uploaded_file)
-            if success and rosters:
-                st.session_state.all_rosters = rosters
-                st.session_state.current_unit_code = u_code
-                st.session_state.current_unit_name = u_name
-                st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-                st.session_state.current_emp_id = list(rosters.keys())[0]
-                st.success(f"成功動態解析【{u_name} ({u_code})】大表！共 {len(rosters)} 位組員。")
-                st.dataframe(df.head(10), use_container_width=True)
-            else:
-                st.error("大表解析失敗，請檢查檔案格式。")
+    # 上傳大表
+    st.subheader("📤 乘務大表 Excel 上傳")
+    uploaded_file = st.file_uploader("上傳月度大表 (.xls, .xlsx)", type=["xls", "xlsx"])
+    
+    if uploaded_file is not None:
+        success, rosters, df, (u_code, u_name) = parse_master_excel(uploaded_file)
+        if success and rosters:
+            st.session_state.all_rosters = rosters
+            st.session_state.current_unit_code = u_code
+            st.session_state.current_unit_name = u_name
+            st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            # 預設選取第一位組員
+            st.session_state.current_emp_id = list(rosters.keys())[0]
+            st.success(f"成功解析【{u_name} ({u_code})】大表！共 {len(rosters)} 位組員。")
+            st.dataframe(df.head(10), use_container_width=True)
+        else:
+            st.error("大表解析失敗，請確認檔案格式是否正確。")
 
-    # 人員動態切換（上傳大表後自動填入）
+    # 動態選單：從大表真實清單中選取檢視對象
     st.divider()
-    st.subheader("👤 模擬登入 / 切換檢視組員")
+    st.subheader("👤 選擇檢視組員")
     if st.session_state.all_rosters:
         emp_options = {f"{info['name']} ({emp}) - {info['role_title']}": emp for emp, info in st.session_state.all_rosters.items()}
-        selected_label = st.selectbox("選擇要檢视的組員班表", list(emp_options.keys()))
+        selected_label = st.selectbox("切換組員", list(emp_options.keys()))
         st.session_state.current_emp_id = emp_options[selected_label]
     else:
-        st.info("尚未上傳大表，目前以系統預設預覽員編展示。")
+        st.warning("⚠️ 請先上傳大表 Excel 以載入組員資料。")
 
     st.divider()
-    st.metric("當前大表基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
-    st.metric("最後同步時間", st.session_state.last_sync_time)
+    st.metric("大表基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
+    st.metric("最後同步", st.session_state.last_sync_time)
 
-# 4. Streamlit 外框 CSS 修正（完全釋放頂部與滿版，保留左上角選單鈕）
+# 4. Streamlit 滿版邊界防護 CSS
 st.markdown(
     """
     <style>
@@ -109,42 +110,29 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 5. 抓取當前選擇組員班表與換班對象
-current_crew = st.session_state.all_rosters.get(st.session_state.current_emp_id, {
-    "emp_id": st.session_state.current_emp_id,
-    "name": "江立夫",
-    "role_title": "車務幹部/組員",
-    "unit": st.session_state.current_unit_code,
-    "unit_name": st.session_state.current_unit_name,
-    "role": st.session_state.user_role,
-    "schedule": [
-        {"d": 9, "wd": "日", "code": "NH1005", "start": "05:51", "end": "13:51", "dur": "8h00m", "rest": "11.0h", "restTag": "green", "tags": []},
-        {"d": 10, "wd": "一", "code": "NF0018", "start": "07:24", "end": "15:24", "dur": "8h00m", "rest": "16.0h", "restTag": "green", "tags": []},
-        {"d": 11, "wd": "二", "code": "NG0001", "start": "05:26", "end": "15:06", "dur": "9h40m", "rest": "23.5h", "restTag": "green", "tags": ["工時>8.5h"]},
-        {"d": 12, "wd": "三", "code": "NH0543", "start": "14:34", "end": "24:16", "dur": "9h42m", "tags": ["工時>8.5h"]},
-        {"d": 13, "wd": "四", "off": "DO1", "barType": "off", "tags": ["休假日"]},
-        {"d": 14, "wd": "五", "off": "DO3X", "barType": "off", "tags": ["休假日"]}
-    ]
-})
+# 5. 取得當前真實選取的組員資料（未上傳前為 None）
+current_crew = None
+if st.session_state.all_rosters and st.session_state.current_emp_id:
+    current_crew = st.session_state.all_rosters.get(st.session_state.current_emp_id)
 
-user_sched = current_crew.get("schedule", [])
+user_sched = current_crew["schedule"] if current_crew else []
 week1 = user_sched[:7]
 week2 = user_sched[7:14]
 week3 = user_sched[14:21]
 
 formatted_schedule = {"week1": week1, "week2": week2, "week3": week3}
 
-# 計算動態換班快搜對象
+# 計算真實換班快搜候選名單
 dynamic_exchange = build_exchange_candidates_dynamic(st.session_state.all_rosters)
 
-# 6. 100% 忠實套用 crew-duty-engine-redesign.html 前端 HTML 範本
+# 6. 純前端 HTML 模板（100% 套用原汁原味 crew-duty-engine-redesign.html）
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>CREW DUTY ENGINE — Redesign Concept</title>
+<title>CREW DUTY ENGINE — Dispatch Terminal</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+TC:wght@400;500;600;700&display=swap');
 
@@ -153,7 +141,6 @@ RAW_HTML_TEMPLATE = """
   --line:#232E3A; --line-soft:#1A222C; --paper:#ECF1F5; --dim:#8492A1; --dim-2:#59636E;
   --blue:#4C9AE0; --blue-dim:rgba(76,154,224,0.13); --amber:#E3A13D; --amber-dim:rgba(227,161,61,0.14);
   --red:#E1615C; --red-dim:rgba(225,97,92,0.14); --green:#4FB88A; --green-dim:rgba(79,184,138,0.14);
-  --purple:#9B8CE0; --purple-dim:rgba(155,140,224,0.14); --grey:#7A8794; --grey-dim:rgba(122,135,148,0.14);
 }
 
 *{box-sizing:border-box;}
@@ -215,47 +202,6 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
   background:linear-gradient(165deg, var(--ink-700), var(--ink-800));
   padding:20px 18px 18px; position:relative; overflow:hidden;
 }
-.hero::before{
-  content:""; position:absolute; right:-40px; top:-40px;
-  width:160px;height:160px;border-radius:50%;
-  background:radial-gradient(circle, rgba(76,154,224,0.16), transparent 70%);
-}
-.hero-top{display:flex;justify-content:space-between;align-items:flex-start;}
-.hero-status{
-  display:inline-flex;align-items:center;gap:6px;
-  font-size:11.5px;color:var(--amber);font-weight:600;
-  background:var(--amber-dim); border:1px solid rgba(227,161,61,0.35);
-  padding:4px 9px;border-radius:20px;
-}
-.hero-status .dot{width:5px;height:5px;border-radius:50%;background:var(--amber);}
-
-.countdown{display:flex;align-items:baseline;gap:10px;margin-top:6px;}
-.countdown .num{
-  font-family:'IBM Plex Mono',monospace; font-size:40px;font-weight:600;letter-spacing:0.5px;color:var(--paper); line-height:1;
-}
-.countdown .unit{font-size:12px;color:var(--dim-2);}
-.hero-next{
-  margin-top:14px;padding-top:14px;border-top:1px solid var(--line);
-  display:flex;justify-content:space-between;align-items:center;
-}
-.hero-next-left{display:flex;flex-direction:column;gap:2px;}
-.hero-next-times{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;color:var(--paper);}
-.hero-next-code{
-  font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--blue);
-  background:var(--blue-dim);border:1px solid rgba(76,154,224,0.3);
-  padding:5px 10px;border-radius:8px;font-weight:600;
-}
-
-.action-row{
-  display:flex; align-items:center; gap:12px;
-  padding:14px 4px; border-bottom:1px solid var(--line-soft);
-  cursor:pointer;
-}
-.action-row:last-child{border-bottom:none;}
-.action-body{flex:1;min-width:0;}
-.action-title{font-size:14px;font-weight:600;color:var(--paper);}
-.action-sub{font-size:11.5px;color:var(--dim-2);margin-top:1px;}
-.action-chev{color:var(--dim-2);}
 
 .panel{
   border:1px solid var(--line); border-radius:12px;
@@ -270,21 +216,18 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
 
 .duty-row{
   display:flex;align-items:center;gap:12px; padding:11px 2px;
-  border-bottom:1px solid var(--line-soft); cursor:pointer;
+  border-bottom:1px solid var(--line-soft);
 }
 .duty-row:last-child{border-bottom:none;}
 .duty-date{width:38px;flex:none;text-align:center;}
-.duty-date .d{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:var(--paper);line-height:1.1;}
-.duty-date .w{font-size:9.5px;color:var(--dim-2);margin-top:1px;}
+.duty-date .d{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:var(--paper);}
+.duty-date .w{font-size:9.5px;color:var(--dim-2);}
 .duty-bar{width:3px;align-self:stretch;border-radius:3px;flex:none;background:var(--blue);}
 .duty-bar.off{background:var(--red);}
 .duty-main{flex:1;min-width:0;}
-.duty-times{
-  font-family:'IBM Plex Mono',monospace;font-size:14.5px;font-weight:600;color:var(--paper);
-  display:flex; align-items:center; gap:6px;
-}
+.duty-times{font-family:'IBM Plex Mono',monospace;font-size:14.5px;font-weight:600;color:var(--paper);}
 .duty-off-label{font-size:13.5px;font-weight:600;color:var(--red);}
-.duty-meta{font-size:11px;color:var(--dim-2);margin-top:2px;display:flex;gap:8px;align-items:center;}
+.duty-meta{font-size:11px;color:var(--dim-2);margin-top:2px;display:flex;gap:8px;}
 
 .tag{
   font-size:9.5px;font-weight:600;padding:2.5px 6px;border-radius:5px;
@@ -292,7 +235,13 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
 }
 .tag.amber{color:var(--amber);background:var(--amber-dim);}
 .tag.red{color:var(--red);background:var(--red-dim);}
-.tag.green{color:var(--green);background:var(--green-dim);}
+
+.empty-box {
+  text-align: center; padding: 40px 16px; background: var(--ink-800);
+  border: 1px solid var(--line); border-radius: 12px; margin-top: 20px;
+}
+.empty-box .title { font-size: 15px; font-weight: 600; color: var(--paper); margin-bottom: 6px; }
+.empty-box .sub { font-size: 12.5px; color: var(--dim-2); line-height: 1.5; }
 
 .role-tabs{display:flex; gap:8px; margin-bottom:14px;}
 .role-tab{
@@ -302,15 +251,9 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
 }
 .role-tab.active{color:var(--ink-900); background:var(--blue); border-color:var(--blue);}
 
-.btn{
-  display:block; width:100%; text-align:center; padding:13px; border-radius:10px; border:none;
-  font-size:14.5px; font-weight:600; cursor:pointer; font-family:'IBM Plex Sans TC',sans-serif;
-}
-.btn-primary{background:var(--blue); color:var(--ink-900); margin-top:16px;}
-
 .result-card{
   border:1px solid var(--line); border-radius:12px; background:var(--ink-800);
-  padding:13px 14px; margin-bottom:10px; cursor:pointer;
+  padding:13px 14px; margin-bottom:10px;
 }
 
 .profile-head{display:flex; align-items:center; gap:12px; padding:8px 2px 20px;}
@@ -353,55 +296,20 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
     </div>
     <div class="unit-chip">
       <span class="dot"></span>
-      <span id="unitText">TTN</span>
+      <span id="unitText">--</span>
     </div>
   </header>
 
   <main>
     <!-- HOME -->
     <section class="screen active" id="screen-home">
-      <div class="hero">
-        <div class="hero-top">
-          <span class="hero-status"><span class="dot"></span>今日排休 · DO1</span>
-          <span class="hero-cycle mono">週期 2026-09</span>
-        </div>
-        <div style="font-size:12px;color:var(--dim);margin-top:16px;">距下次出勤簽到</div>
-        <div class="countdown">
-          <span class="num" id="cd-h">03</span><span class="unit">時</span>
-          <span class="num" id="cd-m">22</span><span class="unit">分</span>
-          <span class="num" id="cd-s">15</span><span class="unit">秒</span>
-        </div>
-        <div class="hero-next">
-          <div>
-            <div style="font-size:12px;color:var(--dim);" id="nextDutyTitle">9/17（四）NG1547</div>
-            <div style="font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;" id="nextDutyTimes">16:24 → 24:30</div>
-          </div>
-          <div class="hero-next-code" id="nextDutyDur">8h06m</div>
-        </div>
-      </div>
-
-      <div class="section-label">快速功能</div>
-      <div class="panel">
-        <div class="action-row" onclick="showTab('schedule')">
-          <div class="action-body"><div class="action-title">我的月班表</div><div class="action-sub">逐日清單・含班間合規標示</div></div>
-          <span class="action-chev">›</span>
-        </div>
-        <div class="action-row" onclick="showTab('exchange')">
-          <div class="action-body"><div class="action-title">換班快搜</div><div class="action-sub">依 Sign-in 時間窗篩選可換組員</div></div>
-          <span class="action-chev">›</span>
-        </div>
-      </div>
+      <div id="homeContent"></div>
     </section>
 
     <!-- SCHEDULE -->
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:6px;" id="schedTitle">我的月班表</div>
-      <div class="week-head"><span class="w-title">第 1 週</span></div>
-      <div class="panel" id="week1"></div>
-      <div class="week-head"><span class="w-title">第 2 週</span></div>
-      <div class="panel" id="week2"></div>
-      <div class="week-head"><span class="w-title">第 3 週</span></div>
-      <div class="panel" id="week3"></div>
+      <div id="scheduleContent"></div>
     </section>
 
     <!-- EXCHANGE -->
@@ -417,17 +325,7 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
 
     <!-- PROFILE -->
     <section class="screen" id="screen-profile">
-      <div class="profile-head">
-        <div class="avatar" id="profAvatar">江</div>
-        <div>
-          <div style="font-size:15px;font-weight:600;" id="profName">江立夫</div>
-          <div style="font-size:11.5px;color:var(--dim-2);font-family:monospace;" id="profMeta">A026047 · TTN</div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="list-row"><span class="list-row-label">所屬單位</span><span class="list-row-value" id="profUnit">北轉 (TTN)</span></div>
-        <div class="list-row"><span class="list-row-label">同步時間</span><span class="list-row-value" id="profSync">2026-09-05 20:40</span></div>
-      </div>
+      <div id="profileContent"></div>
     </section>
   </main>
 
@@ -455,47 +353,81 @@ main{flex:1; padding:0 16px 96px; overflow-x:hidden;}
 const crewData = __CREW_JSON__;
 const scheduleData = __SCHEDULE_JSON__;
 const exchangeData = __EXCHANGE_JSON__;
+const syncTimeStr = "__SYNC_TIME__";
 
-document.getElementById('unitText').textContent = crewData.unit;
-document.getElementById('schedTitle').textContent = `我的月班表 · ${crewData.emp_id} ${crewData.name}`;
-document.getElementById('profAvatar').textContent = crewData.name ? crewData.name.charAt(0) : 'CD';
-document.getElementById('profName').textContent = crewData.name;
-document.getElementById('profMeta').textContent = `${crewData.emp_id} · ${crewData.unit} · ${crewData.role_title}`;
-document.getElementById('profUnit').textContent = `${crewData.unit_name} (${crewData.unit})`;
-document.getElementById('profSync').textContent = "__SYNC_TIME__";
+// 渲染大表基地
+document.getElementById('unitText').textContent = crewData ? crewData.unit : '--';
 
-function renderWeek(containerId, days){
-  const el = document.getElementById(containerId);
-  if(!el || !days) return;
-  el.innerHTML = days.map(day => {
-    if(day.off){
+// 渲染首頁 (HOME)
+const homeBox = document.getElementById('homeContent');
+if(!crewData){
+  homeBox.innerHTML = `
+    <div class="empty-box">
+      <div class="title">尚未載入乘務大表</div>
+      <div class="sub">請點擊左上角按鈕 <b>「›」</b> 開啟控制台<br>上傳月度乘務 Excel 大表以啟用系統。</div>
+    </div>`;
+} else {
+  homeBox.innerHTML = `
+    <div class="hero">
+      <div style="font-size:13px;font-weight:600;color:var(--blue);">登入組員：${crewData.name} (${crewData.emp_id})</div>
+      <div style="font-size:11.5px;color:var(--dim-2);margin-top:2px;">基地：${crewData.unit_name} (${crewData.unit}) · 職掌：${crewData.role_title}</div>
+    </div>
+    <div class="section-label">系統說明</div>
+    <div class="panel" style="padding:12px;">
+      <div style="font-size:12.5px;color:var(--paper);line-height:1.6;">
+        大表已成功動態解析！您可以切換下方選單至<b>「我的班表」</b>檢視個人全月勤務，或至<b>「換班快搜」</b>進行全基地動態合規換班檢核。
+      </div>
+    </div>`;
+}
+
+// 渲染班表 (SCHEDULE)
+const schedBox = document.getElementById('scheduleContent');
+if(!crewData || !scheduleData.week1 || scheduleData.week1.length === 0){
+  schedBox.innerHTML = `
+    <div class="empty-box">
+      <div class="title">無班表資料</div>
+      <div class="sub">請先上傳 Excel 大表。</div>
+    </div>`;
+} else {
+  document.getElementById('schedTitle').textContent = `我的月班表 · ${crewData.emp_id} ${crewData.name}`;
+  
+  function renderWeekHtml(days){
+    if(!days || days.length === 0) return '';
+    return days.map(day => {
+      if(day.off){
+        return `
+          <div class="duty-row">
+            <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
+            <div class="duty-bar off"></div>
+            <div class="duty-main"><div class="duty-off-label">${day.off}</div></div>
+            <span class="tag red">休假日</span>
+          </div>`;
+      }
+      const tagsHtml = (day.tags||[]).map(t => `<span class="tag amber">${t}</span>`).join(' ');
+      const restHtml = day.rest ? `<span style="color:var(--${day.restTag==='red'?'red':day.restTag==='amber'?'amber':'green'})">班間 ${day.rest}</span>` : '';
       return `
         <div class="duty-row">
           <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
-          <div class="duty-bar off"></div>
-          <div class="duty-main"><div class="duty-off-label">${day.off}</div></div>
-          <span class="tag red">休假日</span>
+          <div class="duty-bar"></div>
+          <div class="duty-main">
+            <div class="duty-times">${day.start} → ${day.end}</div>
+            <div class="duty-meta"><span>${day.code}</span><span>${day.dur}</span>${restHtml}</div>
+          </div>
+          <div>${tagsHtml}</div>
         </div>`;
-    }
-    const tagsHtml = (day.tags||[]).map(t => `<span class="tag amber">${t}</span>`).join(' ');
-    const restHtml = day.rest ? `<span style="color:var(--${day.restTag==='red'?'red':day.restTag==='amber'?'amber':'green'})">班間 ${day.rest}</span>` : '';
-    return `
-      <div class="duty-row">
-        <div class="duty-date"><div class="d mono">${day.d}</div><div class="w">${day.wd}</div></div>
-        <div class="duty-bar"></div>
-        <div class="duty-main">
-          <div class="duty-times">${day.start} → ${day.end}</div>
-          <div class="duty-meta"><span>${day.code}</span><span>${day.dur}</span>${restHtml}</div>
-        </div>
-        <div>${tagsHtml}</div>
-      </div>`;
-  }).join('');
+    }).join('');
+  }
+
+  schedBox.innerHTML = `
+    <div class="week-head"><span class="w-title">第 1 週</span></div>
+    <div class="panel">${renderWeekHtml(scheduleData.week1)}</div>
+    <div class="week-head"><span class="w-title">第 2 週</span></div>
+    <div class="panel">${renderWeekHtml(scheduleData.week2)}</div>
+    <div class="week-head"><span class="w-title">第 3 週</span></div>
+    <div class="panel">${renderWeekHtml(scheduleData.week3)}</div>`;
 }
 
-renderWeek('week1', scheduleData.week1);
-renderWeek('week2', scheduleData.week2);
-renderWeek('week3', scheduleData.week3);
-
+// 渲染換班搜尋 (EXCHANGE)
 function filterRole(role, btn){
   document.querySelectorAll('.role-tab').forEach(t=>t.classList.remove('active'));
   btn.classList.add('active');
@@ -504,11 +436,11 @@ function filterRole(role, btn){
 
 function renderExchange(role){
   const container = document.getElementById('searchResults');
-  const pool = exchangeData[role] || [];
-  if(pool.length === 0){
-    container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--dim-2);">此職務目前無可換班組員資料</div>`;
+  if(!exchangeData || !exchangeData[role] || exchangeData[role].length === 0){
+    container.innerHTML = `<div class="empty-box"><div class="title">無符合資料</div><div class="sub">目前大表中無該職務可換班之組員。</div></div>`;
     return;
   }
+  const pool = exchangeData[role];
   container.innerHTML = pool.map(c => `
     <div class="result-card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -525,6 +457,29 @@ function renderExchange(role){
 }
 renderExchange('服勤員');
 
+// 渲染個人頁面 (PROFILE)
+const profBox = document.getElementById('profileContent');
+if(!crewData){
+  profBox.innerHTML = `
+    <div class="empty-box">
+      <div class="title">未登入組員</div>
+      <div class="sub">請先上傳大表資料。</div>
+    </div>`;
+} else {
+  profBox.innerHTML = `
+    <div class="profile-head">
+      <div class="avatar">${crewData.name ? crewData.name.charAt(0) : 'CD'}</div>
+      <div>
+        <div style="font-size:15px;font-weight:600;">${crewData.name}</div>
+        <div style="font-size:11.5px;color:var(--dim-2);font-family:monospace;">${crewData.emp_id} · ${crewData.unit} · ${crewData.role_title}</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="list-row"><span class="list-row-label">所屬單位</span><span class="list-row-value">${crewData.unit_name} (${crewData.unit})</span></div>
+      <div class="list-row"><span class="list-row-label">大表同步時間</span><span class="list-row-value">${syncTimeStr}</span></div>
+    </div>`;
+}
+
 function showTab(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
@@ -535,9 +490,9 @@ function showTab(name){
 </html>
 """
 
-# 安全注入 JSON 資料至 HTML 模板
+# 資料注入（當未上傳大表時，crewData 即為 None/null）
 HTML_CODE = RAW_HTML_TEMPLATE.replace(
-    "__CREW_JSON__", json.dumps(current_crew, ensure_ascii=False)
+    "__CREW_JSON__", json.dumps(current_crew, ensure_ascii=False) if current_crew else "null"
 ).replace(
     "__SCHEDULE_JSON__", json.dumps(formatted_schedule, ensure_ascii=False)
 ).replace(
