@@ -15,18 +15,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# 自訂暗黑風 Streamlit 原生控制列樣式
-st.markdown(
-    """
-    <style>
-    .stApp { background-color: #070B10 !important; color: #ECF1F5 !important; }
-    div[data-testid="stToolbar"], header[data-testid="stHeader"] { display: flex !important; }
-    .stSelectbox label, .stFileUploader label { color: #8492A1 !important; font-weight: 600; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # Session State 全域狀態管理
 if "current_unit_code" not in st.session_state:
     st.session_state.current_unit_code = "TTN"
@@ -42,55 +30,57 @@ if "user_info" not in st.session_state:
         "role": "ADMIN"
     }
 
-# 頂部模式切換器 (Streamlit Native - 免除 iframe 阻擋問題)
-page_mode = st.radio(
-    "系統模式選單",
-    ["📱 乘務 App 前台", "⚙️ 上傳乘務大表 Excel (管理員)"],
-    horizontal=True,
-    label_visibility="collapsed"
+# ---------------------------------------------------------
+# 1. 側邊欄控制台 (Streamlit Sidebar 控制大表上傳)
+# ---------------------------------------------------------
+st.sidebar.title("⚙️ 乘務系統管理")
+st.sidebar.caption(f"目前使用者：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+
+app_mode = st.sidebar.radio(
+    "主選單切換",
+    ["📱 乘務 App 前台", "📤 上傳乘務大表 Excel"],
+    index=0
 )
 
-# ---------------------------------------------------------
-# 模式 A：⚙️ 上傳乘務大表 Excel 頁面
-# ---------------------------------------------------------
-if page_mode == "⚙️ 上傳乘務大表 Excel (管理員)":
-    st.title("⚙️ CREW DUTY ENGINE · 乘務大表資料庫")
-    st.caption(f"登入管理員：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
-    st.divider()
+st.sidebar.divider()
+st.sidebar.subheader("📌 系統狀態")
+st.sidebar.metric("大表識別基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
+st.sidebar.metric("資料庫最後同步", st.session_state.last_sync_time)
 
-    col1, col2 = st.columns([2, 1])
+# ---------------------------------------------------------
+# 模式 A：📤 上傳乘務大表 Excel
+# ---------------------------------------------------------
+if app_mode == "📤 上傳乘務大表 Excel":
+    st.title("⚙️ CREW DUTY ENGINE · 大表資料庫管理")
+    st.write("請選擇欲上傳之乘務大表 Excel 檔案（支援 `.xls` 或 `.xlsx`）：")
     
-    with col1:
-        st.subheader("📤 上傳月度班表 Excel")
-        uploaded_file = st.file_uploader("請選擇乘務大表 (.xls 或 .xlsx)", type=["xls", "xlsx"])
-        
-        if uploaded_file is not None:
-            success, msg, df, (unit_code, unit_name) = process_uploaded_excel(uploaded_file)
-            if success:
-                st.success(msg)
-                st.session_state.current_unit_code = unit_code
-                st.session_state.current_unit_name = unit_name
-                st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-                
-                st.subheader("📊 班表資料庫預覽 (前 20 列)")
-                st.dataframe(df.head(20), use_container_width=True)
-            else:
-                st.error(msg)
-
-    with col2:
-        st.subheader("📌 當前系統狀態")
-        st.metric("大表自動識別基地", f"{st.session_state.current_unit_name} ({st.session_state.current_unit_code})")
-        st.metric("資料庫最後同步", st.session_state.last_sync_time)
-        st.info("💡 提示：在此處完成上傳後，請切換回「📱 乘務 App 前台」檢視更新後的班表。")
-
+    uploaded_file = st.file_uploader("選擇大表檔案", type=["xls", "xlsx"])
+    
+    if uploaded_file is not None:
+        success, msg, df, (unit_code, unit_name) = process_uploaded_excel(uploaded_file)
+        if success:
+            st.success(msg)
+            st.session_state.current_unit_code = unit_code
+            st.session_state.current_unit_name = unit_name
+            st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            
+            st.subheader("📊 班表資料庫即時預覽 (前 20 列)")
+            st.dataframe(df.head(20), use_container_width=True)
+        else:
+            st.error(msg)
+            
+    st.info("💡 完成檔案上傳後，請點擊左上角 `>` 開啟側邊欄，切換回「📱 乘務 App 前台」。")
     st.stop()
 
 # ---------------------------------------------------------
-# 模式 B：📱 乘務 App 前台介面
+# 模式 B：📱 乘務 App 前台 (純滿版防跑位 CSS)
 # ---------------------------------------------------------
 st.markdown(
     """
     <style>
+    header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], footer {
+        display: none !important; height: 0px !important;
+    }
     html, body, .stApp, [data-testid="stAppViewContainer"] {
         padding: 0 !important; margin: 0 !important; background-color: #070B10 !important;
         overflow: hidden !important; height: 100dvh !important;
@@ -102,7 +92,7 @@ st.markdown(
     div[data-testid="stElementContainer"] { margin: 0 !important; padding: 0 !important; }
     iframe {
         border: none !important; width: 100vw !important; height: 100dvh !important;
-        position: fixed !important; top: 35px !important; left: 0 !important; z-index: 999999 !important;
+        position: fixed !important; top: 0 !important; left: 0 !important; z-index: 999999 !important;
     }
     </style>
     """,
