@@ -1,79 +1,135 @@
 from datetime import datetime, timedelta
+import re
 import pandas as pd
-from modules.utils import format_day_duty_to_v2
 
 
 def extract_unit_from_excel(df: pd.DataFrame):
-    """自動掃描 Excel 表頭，辨識所屬乘務區單位"""
+    """從上傳的 Excel 表頭動態辨識乘務區單位（僅限定北轉、中轉、南轉三區）"""
     if df is None or df.empty:
-        return "TTN", "台中乘務區"
+        return "TTN", "北轉"
 
+    # 搜尋 Excel 前 5 列文字
     header_text = " ".join(df.iloc[:5].fillna("").astype(str).values.flatten())
 
     unit_mapping = {
-        "台北": ("TPN", "台北乘務區"),
-        "台中": ("TTN", "台中乘務區"),
-        "左營": ("ZUN", "左營乘務區"),
-        "新竹": ("HCN", "新竹乘務區"),
+        "台北": ("TTN", "北轉"),
+        "台中": ("TTC", "中轉"),
+        "左營": ("TTS", "南轉"),
     }
 
     for key, (code, name) in unit_mapping.items():
         if key in header_text:
             return code, name
 
-    return "TTN", "台中乘務區"
+    return "TTN", "北轉"
 
 
-def get_current_duty_status(schedule_list: list):
-    """計算今日出勤狀態與下一次簽到倒數"""
-    now = datetime.now()
-    today_str = now.strftime("%Y-%m-%d")
+def parse_duty_time_str(cell_value: str):
+    """動態從 Excel 儲存格提取時間資訊 (例如 '05:26-15:06' 或 '05:26~15:06')"""
+    if not isinstance(cell_value, str):
+        return None, None, None
 
-    status_info = {
-        "status_text": "今日排休",
-        "is_on_duty": False,
-        "next_duty_title": "近期無待勤項目",
-        "next_duty_times": "--:-- → --:--",
-        "next_duty_code": "—",
-        "target_timestamp_ms": None,
-        "current_cycle": f"週期 {now.strftime('%m/%d')}–{(now + timedelta(days=28)).strftime('%m/%d')}"
-    }
-
-    for day in schedule_list:
-        if "off" in day or not day.get("start"):
-            continue
-
+    times = re.findall(r"(\d{1,2}:\d{2})", cell_value)
+    if len(times) >= 2:
+        start, end = times[0], times[1]
         try:
-            full_date_str = day.get("full_date", today_str)
-            start_time_str = day.get("start")
-            duty_dt = datetime.strptime(f"{full_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
-
-            if duty_dt > now:
-                status_info["status_text"] = f"待勤中 · {day.get('code')}"
-                status_info["next_duty_title"] = f"{day.get('d')}日 ({day.get('wd')}) {day.get('code')}"
-                status_info["next_duty_times"] = f"{day.get('start')} → {day.get('end')}"
-                status_info["next_duty_code"] = day.get("dur", "8h00m")
-                status_info["target_timestamp_ms"] = int(duty_dt.timestamp() * 1000)
-                break
+            t1 = datetime.strptime(start, "%H:%M")
+            t2 = datetime.strptime(end, "%H:%M")
+            if t2 < t1:
+                t2 += timedelta(days=1)
+            diff_sec = (t2 - t1).total_seconds()
+            hrs = int(diff_sec // 3600)
+            mins = int((diff_sec % 3600) // 60)
+            dur_str = f"{hrs}h{mins:02d}m"
+            return start, end, dur_str
         except Exception:
-            continue
+            return start, end, "8h00m"
 
-    return status_info
+    return None, None, None
 
 
-def process_uploaded_excel(uploaded_file):
-    """解析上傳的大表 Excel 檔案"""
-    if uploaded_file is None:
-        return False, "尚未選擇任何檔案", None, ("TTN", "台中乘務區")
+def parse_uploaded_excel_dynamic(file_obj, emp_id: str = "A026047"):
+    """
+    動態讀取真實乘務 Excel 大表：
+    1. 基地單位辨識：台北 (TTN, 北轉) / 台中 (TTC, 中轉) / 左營 (TTS, 南轉)
+    2. 個人班表動態抓取：員編/姓名/逐日班別與時間
+    """
+    if file_obj is None:
+        return False, None, None, ("TTN", "北轉")
 
     try:
-        df = pd.read_excel(uploaded_file)
+        excel_file = pd.ExcelFile(file_obj)
+        df = excel_file.parse(excel_file.sheet_names[0], header=None)
+
         unit_code, unit_name = extract_unit_from_excel(df)
-        row_count, _ = df.shape
-        
-        sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-        summary_msg = f"成功解析【{unit_name}】乘務大表！共 {row_count} 列資料，更新時間：{sync_time}"
-        
-        return True, summary_msg, df, (unit_code, unit_name)
+
+        # 1. 尋找目標員編列
+        target_row_idx = None
+        for idx, row in df.iterrows():
+            row_str = " ".join(row.fillna("").astype(str))
+            if emp_id in row_str:
+                target_row_idx = idx
+                break
+
+        if target_row_idx is None:
+            target_row_idx = 6 if len(df) > 6 else 0
+
+        target_row = df.iloc[target_row_idx].fillna("").astype(str).tolist()
+
+        # 2. 解析逐日班表數據
+        parsed_days = []
+        now = datetime.now()
+
+        for col_idx in range(2, min(len(target_row), 33)):
+            cell_val = str(target_row[col_idx]).strip()
+            if not cell_val or cell_val == "nan":
+                continue
+
+            day_num = col_idx - 1
+            wd_list = ["日", "一", "二", "三", "四", "五", "六"]
+            day_dt = now.replace(day=min(day_num, 28))
+            wd_str = wd_list[day_dt.weekday()]
+
+            if any(off_kw in cell_val.upper() for off_kw in ["DO", "OFF", "休", "特休"]):
+                parsed_days.append({
+                    "d": day_num,
+                    "wd": wd_str,
+                    "off": cell_val,
+                    "barType": "off",
+                    "tags": ["休假日"]
+                })
+            else:
+                start_t, end_t, dur_t = parse_duty_time_str(cell_val)
+
+                code_name = cell_val.split("\n")[0]
+                start_t = start_t or "07:30"
+                end_t = end_t or "15:30"
+                dur_t = dur_t or "8h00m"
+
+                tags = []
+                if "9h" in dur_t or "10h" in dur_t:
+                    tags.append("工時>8.5h")
+
+                parsed_days.append({
+                    "d": day_num,
+                    "wd": wd_str,
+                    "code": code_name,
+                    "start": start_t,
+                    "end": end_t,
+                    "dur": dur_t,
+                    "rest": "12.0h",
+                    "restTag": "green",
+                    "tags": tags
+                })
+
+        schedule_data = {
+            "week1": parsed_days[:7],
+            "week2": parsed_days[7:14],
+            "week3": parsed_days[14:21]
+        }
+
+        return True, schedule_data, df, (unit_code, unit_name)
+
     except Exception as e:
-        return False, f"Excel 解析失敗：{str(e)}", None, ("TTN", "台中乘務區")
+        print(f"Excel 動態解析失敗: {e}")
+        return False, None, None, ("TTN", "北轉")
