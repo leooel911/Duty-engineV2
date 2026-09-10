@@ -8,7 +8,7 @@ from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
 from modules.services import get_current_duty_status, process_uploaded_excel
 
-# 2. Streamlit 視口設定
+# 2. Streamlit 視口與頁面設定
 st.set_page_config(
     page_title="CREW DUTY ENGINE V2",
     page_icon="🚆",
@@ -17,18 +17,28 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 3. Session State 狀態與權限管理
+# 3. Session State 狀態與預設管理員權限
 # ---------------------------------------------------------
 if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-if "user_info" not in st.session_state:
-    st.session_state.user_info = None
+    st.session_state.authenticated = True  # 預設為已驗證
+
+if "user_info" not in st.session_state or st.session_state.user_info is None:
+    st.session_state.user_info = {
+        "emp_id": "A026047",
+        "name": "江立夫",
+        "unit": DEFAULT_UNIT,
+        "unit_name": UNIT_NAME,
+        "title": "車務幹部/組員",
+        "role": "ADMIN"
+    }
+
 if "admin_mode" not in st.session_state:
     st.session_state.admin_mode = False
+
 if "last_sync_time" not in st.session_state:
     st.session_state.last_sync_time = "2026-09-05 20:40"
 
-# URL 參數登出/切換處理
+# URL 動作事件處理 (頂層主網址)
 action = st.query_params.get("action")
 if action == "logout":
     st.session_state.authenticated = False
@@ -122,7 +132,7 @@ if not st.session_state.authenticated:
           e.preventDefault();
           const empId = document.getElementById('emp_id').value;
           const empName = document.getElementById('emp_name').value;
-          window.location.href = `?action=login&id=${encodeURIComponent(empId)}&name=${encodeURIComponent(empName)}`;
+          window.top.location.href = window.top.location.pathname + `?action=login&id=${encodeURIComponent(empId)}&name=${encodeURIComponent(empName)}`;
         }
       </script>
     </body>
@@ -132,7 +142,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ---------------------------------------------------------
-# 5. 後台管理員介面 (Admin Management Panel)
+# 5. 後台管理員控制台 (Admin Management Panel)
 # ---------------------------------------------------------
 if st.session_state.admin_mode:
     st.markdown(
@@ -145,35 +155,35 @@ if st.session_state.admin_mode:
         unsafe_allow_html=True,
     )
     st.title("⚙️ CREW DUTY ENGINE · 後台管理控制台")
-    st.caption(f"目前管理員：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
+    st.caption(f"當前管理員：{st.session_state.user_info['name']} ({st.session_state.user_info['emp_id']})")
     
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.subheader("📤 更新乘務大表 Excel")
-        uploaded_file = st.file_uploader("上傳月度班表 Excel (.xls, .xlsx)", type=["xls", "xlsx"])
+        st.subheader("📤 上傳與更新乘務大表 Excel")
+        uploaded_file = st.file_uploader("選擇月度班表 Excel 檔案 (.xls, .xlsx)", type=["xls", "xlsx"])
         
         if uploaded_file is not None:
             success, msg, df = process_uploaded_excel(uploaded_file)
             if success:
                 st.success(msg)
                 st.session_state.last_sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-                st.subheader("📊 預覽大表數據庫結構")
-                st.dataframe(df.head(10), use_container_width=True)
+                st.subheader("📊 班表資料庫即時預覽")
+                st.dataframe(df.head(15), use_container_width=True)
             else:
                 st.error(msg)
                 
     with col2:
-        st.subheader("📌 系統資料庫狀態")
+        st.subheader("📌 系統與資料庫狀態")
         st.metric("當前基地", DEFAULT_UNIT)
-        st.metric("最後更新時間", st.session_state.last_sync_time)
+        st.metric("大表最後同步時間", st.session_state.last_sync_time)
         st.divider()
-        if st.button("⬅️ 返回前台乘務 App", use_container_width=True):
+        if st.button("⬅️ 切換回前台乘務 App 視角", use_container_width=True):
             st.session_state.admin_mode = False
             st.rerun()
     st.stop()
 
 # ---------------------------------------------------------
-# 6. 前台使用者 UI (已登入狀態)
+# 6. 前台使用者 UI
 # ---------------------------------------------------------
 st.markdown(
     """
@@ -487,8 +497,16 @@ document.getElementById('profUnit').textContent = userData.unit_name + ' (' + us
 document.getElementById('profRole').textContent = userData.role || 'ADMIN';
 document.getElementById('profSyncTime').textContent = syncTimeStr;
 
-function handleAdminToggle(){ window.location.href = '?action=toggle_admin'; }
-function handleLogout(){ if(confirm('確定要登出乘務系統嗎？')){ window.location.href = '?action=logout'; } }
+// 使用 window.top.location 確保能順利觸發 Streamlit 父頁面網址刷新
+function handleAdminToggle(){ 
+  window.top.location.href = window.top.location.pathname + '?action=toggle_admin'; 
+}
+
+function handleLogout(){ 
+  if(confirm('確定要登出乘務系統嗎？')){ 
+    window.top.location.href = window.top.location.pathname + '?action=logout'; 
+  } 
+}
 
 document.getElementById('statusTxt').textContent = statusData.status_text;
 document.getElementById('heroCycle').textContent = statusData.current_cycle;
