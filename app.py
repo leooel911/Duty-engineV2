@@ -78,7 +78,7 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (使用 .replace 安全注入 JSON)
+# 4. 全介面 HTML / CSS / JS 模板 (帶回 Hero 卡片與計時器)
 # ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -100,7 +100,7 @@ RAW_HTML_TEMPLATE = """
 
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;background:var(--ink-900);color:var(--paper);font-family:'IBM Plex Sans TC','IBM Plex Mono',sans-serif;-webkit-font-smoothing:antialiased;height:100%;overflow:hidden;}
-.mono{font-family:'IBM Plex Mono',monospace;}
+.mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
 
 .app{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;position:relative;background:var(--ink-900);}
 .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:rgba(7,11,16,0.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(35,46,58,0.5);}
@@ -114,7 +114,55 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
 .screen.active{display:block;}
 
 .section-label{font-size:11px;color:var(--dim-2);font-weight:600;margin:16px 2px 8px;}
+.section-label:first-child{margin-top:2px;}
 .panel{border:1px solid var(--line);border-radius:12px;background:var(--ink-800);padding:2px 12px;margin-bottom:12px;}
+
+/* Hero 卡片與倒數計時 */
+.hero{
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:linear-gradient(165deg, var(--ink-700), var(--ink-800));
+  padding:18px 16px;
+  margin-bottom:14px;
+  position:relative;
+  overflow:hidden;
+}
+.hero::before{
+  content:"";
+  position:absolute; right:-40px; top:-40px;
+  width:160px;height:160px;border-radius:50%;
+  background:radial-gradient(circle, rgba(76,154,224,0.16), transparent 70%);
+}
+.hero-top{display:flex;justify-content:space-between;align-items:flex-start;}
+.hero-status{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;color:var(--amber);font-weight:600;
+  background:var(--amber-dim); border:1px solid rgba(227,161,61,0.35);
+  padding:4px 9px;border-radius:20px;
+}
+.hero-status .dot{width:5px;height:5px;border-radius:50%;background:var(--amber);}
+.hero-cycle{font-size:10.5px;color:var(--dim-2);font-family:'IBM Plex Mono',monospace;}
+
+.hero-label{font-size:12px;color:var(--dim);margin-top:14px;}
+.countdown{display:flex;align-items:baseline;gap:10px;margin-top:6px;}
+.countdown .num{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:36px;font-weight:600;letter-spacing:0.5px;color:var(--paper);
+  line-height:1;
+}
+.countdown .unit{font-size:12px;color:var(--dim-2);}
+.hero-next{
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.hero-next-left{display:flex;flex-direction:column;gap:2px;}
+.hero-next-date{font-size:12px;color:var(--dim);}
+.hero-next-times{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:var(--paper);}
+.hero-next-code{
+  font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--blue);
+  background:var(--blue-dim);border:1px solid rgba(76,154,224,0.3);
+  padding:4px 8px;border-radius:8px;font-weight:600;
+}
 
 /* Duty Row */
 .duty-row{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--line-soft);cursor:pointer;}
@@ -167,7 +215,28 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
   <main id="mainContainer">
     <!-- 1. 今日首頁 -->
     <section class="screen active" id="screen-home">
-      <div class="section-label" style="margin-top:2px;">目前登入組員</div>
+      <!-- 英雄卡片與倒數計時器 -->
+      <div class="hero">
+        <div class="hero-top">
+          <span class="hero-status" id="heroStatus"><span class="dot"></span>今日休假・DO1</span>
+          <span class="hero-cycle mono">週期 09/06–10/03</span>
+        </div>
+        <div class="hero-label">距下次出勤簽到</div>
+        <div class="countdown">
+          <span class="num" id="cd-h">--</span><span class="unit">時</span>
+          <span class="num" id="cd-m">--</span><span class="unit">分</span>
+          <span class="num" id="cd-s">--</span><span class="unit">秒</span>
+        </div>
+        <div class="hero-next">
+          <div class="hero-next-left">
+            <div class="hero-next-date">9/17（四）NG1547</div>
+            <div class="hero-next-times">16:24 <span style="color:var(--dim-2);font-weight:400;font-size:13px;">→</span> 24:30</div>
+          </div>
+          <div class="hero-next-code">8h06m</div>
+        </div>
+      </div>
+
+      <div class="section-label">目前登入組員</div>
       <div class="panel" style="padding:12px 14px;">
         <div style="font-size:18px;font-weight:700;" id="userName">--</div>
         <div style="font-size:12px;color:var(--dim-2);font-family:monospace;margin-top:2px;" id="userMeta">--</div>
@@ -230,6 +299,23 @@ const exchangeData = __EXCHANGE_DATA__;
 document.getElementById('headerUnit').textContent = userData.unit + ' · 已同步';
 document.getElementById('userName').textContent = userData.name + ' (' + userData.emp_id + ')';
 document.getElementById('userMeta').textContent = userData.unit_name + ' · ' + userData.title;
+
+// 倒數計時器邏輯
+function pad(n){ return String(n).padStart(2,'0'); }
+function updateCountdown(){
+  const now = new Date();
+  const target = new Date();
+  target.setHours(now.getHours()+3, now.getMinutes()+22, 15, 0);
+  let diff = Math.max(0, target - now);
+  const h = Math.floor(diff/3600000);
+  const m = Math.floor((diff%3600000)/60000);
+  const s = Math.floor((diff%60000)/1000);
+  document.getElementById('cd-h').textContent = pad(h);
+  document.getElementById('cd-m').textContent = pad(m);
+  document.getElementById('cd-s').textContent = pad(s);
+}
+updateCountdown();
+setInterval(updateCountdown, 1000);
 
 // 渲染班表
 const schedContainer = document.getElementById('scheduleContainer');
