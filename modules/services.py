@@ -4,13 +4,10 @@ from modules.utils import format_day_duty_to_v2
 
 
 def extract_unit_from_excel(df: pd.DataFrame):
-    """
-    自動掃描大表 Excel 表頭，動態識別所屬乘務區單位
-    """
+    """自動掃描 Excel 表頭，辨識所屬乘務區單位"""
     if df is None or df.empty:
-        return "TTN", "台中乘務區"  # 無資料時的預設備援
+        return "TTN", "台中乘務區"
 
-    # 將 Excel 前 5 列資料拼成字串進行關鍵字比對
     header_text = " ".join(df.iloc[:5].fillna("").astype(str).values.flatten())
 
     unit_mapping = {
@@ -28,7 +25,7 @@ def extract_unit_from_excel(df: pd.DataFrame):
 
 
 def get_current_duty_status(schedule_list: list):
-    """根據當前系統時間 (datetime.now())，計算今日狀態與下一次簽到目標毫秒戳"""
+    """計算今日出勤狀態與下一次簽到倒數"""
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
 
@@ -65,11 +62,9 @@ def get_current_duty_status(schedule_list: list):
 
 
 def process_uploaded_excel(uploaded_file):
-    """
-    處理並驗證上傳的乘務大表 Excel，並自動萃取單位名稱
-    """
+    """解析上傳的大表 Excel 檔案"""
     if uploaded_file is None:
-        return False, "尚未上傳任何檔案", None, ("TTN", "台中乘務區")
+        return False, "尚未選擇任何檔案", None, ("TTN", "台中乘務區")
 
     try:
         df = pd.read_excel(uploaded_file)
@@ -77,8 +72,8 @@ def process_uploaded_excel(uploaded_file):
         row_count, _ = df.shape
         
         sync_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-        summary_msg = f"成功解析【{unit_name}】班表！共讀取 {row_count} 列資料，最後同步時間：{sync_time}"
+        summary_msg = f"成功解析【{unit_name}】乘務大表！共 {row_count} 列資料，更新時間：{sync_time}"
         
         return True, summary_msg, df, (unit_code, unit_name)
     except Exception as e:
-        return False, f"Excel 檔案格式解析失敗：{str(e)}", None, ("TTN", "台中乘務區")
+        return False, f"Excel 解析失敗：{str(e)}", None, ("TTN", "台中乘務區")
