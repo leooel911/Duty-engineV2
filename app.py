@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 # 1. 載入核心模組與算力服務
 from config import DEFAULT_UNIT, UNIT_NAME
 from modules.utils import format_day_duty_to_v2
-from modules.services import get_current_duty_status
+from modules.services import get_current_duty_status, parse_excel_roster
 
 # 2. Streamlit 視口重置
 st.set_page_config(
@@ -88,7 +88,7 @@ backend_exchange_candidates = {
 }
 
 # ---------------------------------------------------------
-# 4. 全介面 HTML / CSS / JS 模板 (加入班表圖例列)
+# 4. 全介面 HTML / CSS / JS 模板 (對齊終端視覺與圖例列)
 # ---------------------------------------------------------
 RAW_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -290,7 +290,7 @@ main{flex:1;padding:12px 16px calc(76px + env(safe-area-inset-bottom,0px));overf
     <section class="screen" id="screen-schedule">
       <div class="section-label" style="margin-top:2px;">個人班表 · 班間休息檢核</div>
       
-      <!-- 原型對齊：班表狀態圖例標籤列 -->
+      <!-- 班表狀態圖例標籤列 -->
       <div class="legend-bar">
         <span class="legend-chip grey">偏駐</span>
         <span class="legend-chip red">休假日</span>
