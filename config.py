@@ -1,38 +1,40 @@
-import io
-import json
+"""
+CREW DUTY ENGINE V2 - Global Configuration & Paths
+全站路徑、單位班表、系統設定與日誌路徑配置檔
+"""
 import os
-import sys
 
-# 🛠️ 自動加入專案根目錄，解決跨資料夾引用 config.py 問題
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+# 專案根目錄
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-import re
-import smtplib
-from datetime import date, datetime, timedelta, timezone
-from email.header import Header
-from email.mime.text import MIMEText
-from typing import Any, Dict, List, Optional, Tuple, Union
+# 資料與上傳檔案目錄
+DATA_DIR = os.path.join(BASE_DIR, "data")
+FEEDBACK_IMG_DIR = os.path.join(DATA_DIR, "feedback_images")
 
-import pandas as pd
-import streamlit as st
+# 設定檔與日誌檔案路徑
+SYSTEM_CONFIG_FILE = os.path.join(DATA_DIR, "system_config.json")
+WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.json")
+LOG_FILE = os.path.join(DATA_DIR, "system_logs.json")
 
-try:
-    from config import (
-        DATA_DIR,
-        LEAVE_CODES,
-        LOG_FILE,
-        NATIONAL_HOLIDAYS,
-        TAIWAN_TZ,
-        UNITS,
-    )
-except ImportError:
-    DATA_DIR = os.path.join(BASE_DIR, "data")
-    LOG_FILE = os.path.join(DATA_DIR, "activity_log.txt")
-    TAIWAN_TZ = timezone(timedelta(hours=8))
-    LEAVE_CODES = ["PAY", "FAC", "LEV", "MLP", "MTR", "UNP"]
-    NATIONAL_HOLIDAYS = {}
-    UNITS = {}
+# 自動建立必要資料夾，避免讀寫時找不到目錄
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(FEEDBACK_IMG_DIR, exist_ok=True)
 
-# (此處接續原本 utils.py 的完整內容)
+# 各單位班表對應路徑
+UNITS = {
+    "TTN": {
+        "服勤員": os.path.join(DATA_DIR, "TTN_TA.xlsx"),
+        "駕駛": os.path.join(DATA_DIR, "TTN_TD.xlsx"),
+        "列車長": os.path.join(DATA_DIR, "TTN_TM.xlsx"),
+    },
+    "TTC": {
+        "服勤員": os.path.join(DATA_DIR, "TTC_TA.xlsx"),
+        "駕駛": os.path.join(DATA_DIR, "TTC_TD.xlsx"),
+        "列車長": os.path.join(DATA_DIR, "TTC_TM.xlsx"),
+    },
+    "TTS": {
+        "服勤員": os.path.join(DATA_DIR, "TTS_TA.xlsx"),
+        "駕駛": os.path.join(DATA_DIR, "TTS_TD.xlsx"),
+        "列車長": os.path.join(DATA_DIR, "TTS_TM.xlsx"),
+    },
+}
